@@ -10,5 +10,8 @@ mediapipe>=0.10
 # Mobile-friendly MP4 export
 imageio-ffmpeg>=0.6
 
+# Model hosting/download helpers
+huggingface-hub>=0.24
+
 # Test suite
 pytest>=8.0

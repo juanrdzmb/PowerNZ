@@ -21,7 +21,7 @@ python model_downloader.py
 
 O doble clic en `descargar_modelos.bat`.
 
-El archivo `model_manifest.json` define las URLs, hashes y rutas locales. Si cambio de GitHub Releases a Hugging Face, solo actualizo ese manifest.
+El archivo `model_manifest.json` define las URLs, hashes y rutas locales. Ahora apunta a Hugging Face (`juanrdzmb/PowerNZ-Models`). Si cambio de cuenta o hosting, solo actualizo ese manifest.
 
 ## Como Carga La App
 
@@ -77,4 +77,4 @@ models/powerai_athlete_seg.pt segment {0: 'athlete'}
 
 ## Publicar Modelos
 
-No subo `.pt` al repo. Para esta v1 los publico como assets de una release `models-v1`. Si necesito que cualquiera los descargue sin login, esa release o el hosting de modelos debe ser publico.
+No subo `.pt` al repo. Para esta v1 los publico en Hugging Face como `juanrdzmb/PowerNZ-Models`. Si necesito subir una nueva version, actualizo los pesos alli y cambio hashes/URLs en `model_manifest.json` cuando corresponda.

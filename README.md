@@ -20,7 +20,7 @@ El objetivo de esta v1 no es llenar la pantalla de lineas. Quiero que el video d
 
 ## Modelos
 
-Dejo los pesos descargados dentro de `models/`, pero no los subo a Git porque son grandes. El repo trae un descargador para bajarlos desde una release.
+Dejo los pesos descargados dentro de `models/`, pero no los subo a Git porque son grandes. El repo trae un descargador para bajarlos desde Hugging Face.
 
 | Archivo | Uso |
 |---|---|
@@ -39,6 +39,8 @@ python model_downloader.py
 
 Tambien puedo hacer doble clic en `descargar_modelos.bat`.
 
+Las URLs viven en `models/model_manifest.json`. Para esta v1 apuntan a `juanrdzmb/PowerNZ-Models` en Hugging Face. Si cambio de cuenta o hosting, solo actualizo ese manifest.
+
 ## Instalacion
 
 ```powershell
@@ -46,6 +48,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python model_downloader.py
 ```
 
 ## Uso Rapido
