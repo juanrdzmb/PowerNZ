@@ -27,6 +27,8 @@ models/exported/
 # Downloadable base weights and dataset caches (not committed)
 /yolov8n.pt
 /yolov8x-worldv2.pt
+/yolo11*-seg.pt
+/yolov8n-seg.pt
 /weights/
 *.cache
 

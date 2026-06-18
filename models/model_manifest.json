@@ -1,0 +1,29 @@
+{
+  "version": "models-v1",
+  "models": [
+    {
+      "name": "Detector de barra y discos",
+      "path": "models/powerai_bar_detector.pt",
+      "url": "https://github.com/juanrdzmb/PowerNZ/releases/download/models-v1/powerai_bar_detector.pt",
+      "sha256": "19b0d6729eadb0ecc88e5209aac66fc7711e2cbb698db3531156e978e737d34d",
+      "required": true,
+      "description": "Modelo YOLO detect con clases plate y bar_hub."
+    },
+    {
+      "name": "Segmentacion del atleta",
+      "path": "models/powerai_athlete_seg.pt",
+      "url": "https://github.com/juanrdzmb/PowerNZ/releases/download/models-v1/powerai_athlete_seg.pt",
+      "sha256": "8d1087b5761a7ccb0708e3f0653b52029fda666cf312d4735ff8f1d127b2b3d0",
+      "required": true,
+      "description": "Modelo YOLO segment con clase athlete."
+    },
+    {
+      "name": "Pose MediaPipe opcional",
+      "path": "models/pose_landmarker_lite.task",
+      "url": "https://github.com/juanrdzmb/PowerNZ/releases/download/models-v1/pose_landmarker_lite.task",
+      "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a",
+      "required": false,
+      "description": "Modelo opcional para usar --pose-backend mediapipe."
+    }
+  ]
+}
