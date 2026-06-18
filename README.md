@@ -77,6 +77,13 @@ La guia paso a paso esta en:
 docs/ANALISIS_EN_KAGGLE.md
 ```
 
+Si Kaggle no arranca o no deja ejecutar, uso Google Colab:
+
+```text
+cloud/PowerNZ_Colab_Analisis.ipynb
+docs/ANALISIS_EN_COLAB.md
+```
+
 Peso muerto:
 
 ```powershell
