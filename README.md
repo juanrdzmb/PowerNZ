@@ -39,7 +39,7 @@ python model_downloader.py
 
 Tambien puedo hacer doble clic en `descargar_modelos.bat`.
 
-Las URLs viven en `models/model_manifest.json`. Para esta v1 apuntan a `juanrdzmb/PowerNZ-Models` en Hugging Face. Si cambio de cuenta o hosting, solo actualizo ese manifest.
+Las URLs viven en `models/model_manifest.json`. Para esta v1 apuntan a `dzmbo/PowerNZ-Models` en Hugging Face. Si cambio de cuenta o hosting, solo actualizo ese manifest.
 
 ## Instalacion
 

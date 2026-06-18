@@ -7,7 +7,7 @@ Los modelos entrenados no viven dentro de Git. Mi idea es que el repo siga liger
 Para usuarios normales, lo mas limpio es publicar los pesos en un repo publico de Hugging Face:
 
 ```text
-juanrdzmb/PowerNZ-Models
+dzmbo/PowerNZ-Models
 ```
 
 Archivos que debe contener:
@@ -46,7 +46,7 @@ huggingface-cli login
 python upload_models_to_huggingface.py
 ```
 
-Ese script crea el repo `juanrdzmb/PowerNZ-Models` si no existe y sube los tres archivos desde:
+Ese script crea el repo `dzmbo/PowerNZ-Models` si no existe y sube los tres archivos desde:
 
 ```text
 C:\Users\Juanda\Documents\PowerAI\models

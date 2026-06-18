@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 
-DEFAULT_REPO_ID = "juanrdzmb/PowerNZ-Models"
+DEFAULT_REPO_ID = "dzmbo/PowerNZ-Models"
 DEFAULT_SOURCE_DIR = Path(r"C:\Users\Juanda\Documents\PowerAI\models")
 MODEL_FILES = (
     "powerai_bar_detector.pt",
@@ -31,7 +31,16 @@ def main() -> int:
         raise SystemExit(f"Faltan modelos en {args.source_dir}: {', '.join(missing)}")
 
     api = HfApi()
-    api.create_repo(repo_id=args.repo_id, repo_type="model", private=args.private, exist_ok=True)
+    try:
+        api.create_repo(repo_id=args.repo_id, repo_type="model", private=args.private, exist_ok=True)
+    except Exception as exc:  # noqa: BLE001 - Hugging Face envuelve el 403 segun version
+        message = str(exc)
+        if "403" in message or "Forbidden" in message:
+            raise SystemExit(
+                "Hugging Face no me deja crear ese repo. Revisa que el repo-id use tu usuario real "
+                "(por ejemplo dzmbo/PowerNZ-Models) y que hayas iniciado sesion con un token Write."
+            ) from exc
+        raise
 
     for name in MODEL_FILES:
         local_path = args.source_dir / name
