@@ -1,0 +1,7 @@
+path: ../datasets/training
+train: frames/
+val: frames/
+names:
+  0: athlete
+  1: background_person
+nc: 2

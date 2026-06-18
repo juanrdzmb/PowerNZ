@@ -1,0 +1,7 @@
+path: ../datasets/training_yolo/bar_2cls
+train: images/train
+val: images/val
+nc: 2
+names:
+  0: plate
+  1: bar_hub

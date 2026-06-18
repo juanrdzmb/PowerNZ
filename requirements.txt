@@ -1,0 +1,14 @@
+# Core numeric/video stack
+numpy>=1.26
+opencv-python>=4.8
+Pillow>=10.0
+
+# Pose, detection and optional segmentation backends
+ultralytics>=8.0
+mediapipe>=0.10
+
+# Mobile-friendly MP4 export
+imageio-ffmpeg>=0.6
+
+# Test suite
+pytest>=8.0

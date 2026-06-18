@@ -1,0 +1,9 @@
+path: ../datasets/training_yolo/bar_4cls
+train: images/train
+val: images/val
+names:
+  0: plate
+  1: bar_hub
+  2: bar_sleeve
+  3: bar_shaft
+nc: 4
