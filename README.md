@@ -63,6 +63,20 @@ Desde esa ventana elijo el video, el ejercicio, la salida y pulso `Analizar vide
 
 Si quiero usar la terminal, tambien puedo ejecutar los comandos directamente.
 
+## Uso En La Nube Gratis
+
+Si mi PC va lenta, uso Kaggle con GPU gratis. Deje un notebook preparado aqui:
+
+```text
+cloud/PowerNZ_Kaggle_Analisis.ipynb
+```
+
+La guia paso a paso esta en:
+
+```text
+docs/ANALISIS_EN_KAGGLE.md
+```
+
 Peso muerto:
 
 ```powershell
