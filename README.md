@@ -68,6 +68,7 @@ Si quiero usar la terminal, tambien puedo ejecutar los comandos directamente.
 Si mi PC va lenta, uso Kaggle con GPU gratis. Deje un notebook preparado aqui:
 
 ```text
+cloud/PowerNZ_Kaggle_Simple.ipynb
 cloud/PowerNZ_Kaggle_Analisis.ipynb
 ```
 

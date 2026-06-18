@@ -20,7 +20,15 @@ Si ese repo no es publico, Kaggle no podra descargar los modelos sin token.
 4. Activo `Internet`.
 5. En `Accelerator`, elijo `GPU T4` o `GPU P100` si esta disponible.
 6. Subo mi video como dataset al notebook.
-7. Abro o copio el notebook:
+7. Abro o copio el notebook simple:
+
+```text
+cloud/PowerNZ_Kaggle_Simple.ipynb
+```
+
+Ese es el recomendado porque tiene una sola celda y evita errores de orden.
+
+Tambien existe la version por pasos:
 
 ```text
 cloud/PowerNZ_Kaggle_Analisis.ipynb
