@@ -11,6 +11,18 @@ Esta carpeta es el punto de entrada de los modelos locales. Los pesos no se vers
 | `pose_landmarker_lite.task` | MediaPipe Tasks | pose | Backend alternativo de pose. |
 | `yolo11s-seg.pt`, `yolo11n-seg.pt` | YOLO segment | `person` | Fallback si falta el modelo propio de atleta. |
 
+## Como Los Descargo
+
+La forma normal es:
+
+```powershell
+python model_downloader.py
+```
+
+O doble clic en `descargar_modelos.bat`.
+
+El archivo `model_manifest.json` define las URLs, hashes y rutas locales. Ahora apunta a Hugging Face (`dzmbo/PowerNZ-Models`). Si cambio de cuenta o hosting, solo actualizo ese manifest.
+
 ## Como Carga La App
 
 1. Si existe `models/powerai_bar_detector.pt`, lo uso automaticamente para `plate` y `bar_hub`.
@@ -65,4 +77,4 @@ models/powerai_athlete_seg.pt segment {0: 'athlete'}
 
 ## Publicar Modelos
 
-No subo `.pt` al repo. Para compartir una version usare GitHub Releases, Hugging Face, Drive u otro almacenamiento externo y mantendre estos nombres al descargarlos en `models/`.
+No subo `.pt` al repo. Para esta v1 los publico en Hugging Face como `dzmbo/PowerNZ-Models`. Si necesito subir una nueva version, actualizo los pesos alli y cambio hashes/URLs en `model_manifest.json` cuando corresponda.

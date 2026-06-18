@@ -20,7 +20,7 @@ El objetivo de esta v1 no es llenar la pantalla de lineas. Quiero que el video d
 
 ## Modelos
 
-Dejo los pesos dentro de `models/`, pero no los subo a Git porque son grandes.
+Dejo los pesos descargados dentro de `models/`, pero no los subo a Git porque son grandes. El repo trae un descargador para bajarlos desde Hugging Face.
 
 | Archivo | Uso |
 |---|---|
@@ -31,6 +31,16 @@ Dejo los pesos dentro de `models/`, pero no los subo a Git porque son grandes.
 
 En v1 la heuristica por color de discos esta apagada cuando el detector entrenado carga bien. Si quiero forzar el respaldo por color uso `--enable-plate-heuristic`.
 
+Para descargar los modelos entrenados:
+
+```powershell
+python model_downloader.py
+```
+
+Tambien puedo hacer doble clic en `descargar_modelos.bat`.
+
+Las URLs viven en `models/model_manifest.json`. Para esta v1 apuntan a `dzmbo/PowerNZ-Models` en Hugging Face. Si cambio de cuenta o hosting, solo actualizo ese manifest.
+
 ## Instalacion
 
 ```powershell
@@ -38,9 +48,20 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python model_downloader.py
 ```
 
 ## Uso Rapido
+
+La forma mas comoda en Windows es abrir:
+
+```text
+abrir_powernz.bat
+```
+
+Desde esa ventana elijo el video, el ejercicio, la salida y pulso `Analizar video`. Si faltan modelos, la app me pregunta si quiero descargarlos antes de empezar.
+
+Si quiero usar la terminal, tambien puedo ejecutar los comandos directamente.
 
 Peso muerto:
 
