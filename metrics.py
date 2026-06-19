@@ -705,6 +705,46 @@ class BiomechanicsEngine:
             raw_velocity_mps=velocity_mps,
         )
 
+    def update_reconstructed(
+        self,
+        frame_index: int,
+        position_m: float,
+        velocity_mps: float,
+        hub_confidence: float = 0.0,
+        plate_confidence: float = 0.0,
+        tracking_source: str = "offline",
+    ) -> KinematicSample:
+        """Replay a completed, zero-phase trajectory through the rep FSM.
+
+        Technical evidence is deliberately evaluated after the mechanical replay
+        so unknown camera geometry produces a review rather than silently
+        preventing a candidate from being reported at all.
+        """
+        self._last_filtered_position_m = position_m
+        self._last_smoothed_velocity_mps = velocity_mps
+        self._record_velocity(velocity_mps)
+        state, rep_index, rep_displacement_m = self._state_machine.update(
+            frame_index=frame_index,
+            position_m=position_m,
+            smoothed_velocity_mps=velocity_mps,
+            depth_ok=True,
+            lockout_ok=True,
+        )
+        return KinematicSample(
+            frame_index=frame_index,
+            time_seconds=frame_index / self._fps,
+            position_m=position_m,
+            velocity_mps=velocity_mps,
+            smoothed_velocity_mps=velocity_mps,
+            state=state,
+            rep_index=rep_index,
+            rep_displacement_m=rep_displacement_m,
+            hub_confidence=hub_confidence,
+            plate_confidence=plate_confidence,
+            tracking_source=tracking_source,
+            raw_velocity_mps=velocity_mps,
+        )
+
     def finalize(self, frame_index: int) -> None:
         self._state_machine.finalize(frame_index)
 

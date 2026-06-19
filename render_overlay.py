@@ -239,6 +239,8 @@ class OverlayConfig:
     # only for display so the corner brackets sit on the disc edge.
     plate_box_display_scale: float = 1.36
     plate_box_style: str = "full"
+    velocity_window_seconds: float = 4.5
+    visual_hold_frames: int = 8
 
 
 class OverlayRenderer:
@@ -405,6 +407,7 @@ class OverlayRenderer:
         anchor_velocity_history: dict[str, list[float]] | None = None,
         velocity_frame_history: list[int] | None = None,
         chart_max_abs: float | None = None,
+        video_fps: float = 30.0,
         anchor_velocities: list[AnchorVelocity] | None = None,
         rep_reports: list[RepReport] | None = None,
         bar_anchor: BarAnchorState | None = None,
@@ -441,6 +444,7 @@ class OverlayRenderer:
             rep_reports or [],
             velocity_frame_history or [],
             max_abs_override=chart_max_abs,
+            video_fps=video_fps,
         )
         self._draw_rep_table(output, rep_reports or [], bottom_limit=chart_top, avoid_rect=telemetry_rect)
         # The floating bar-velocity badge was dropped: it sat on top of the plate/hub boxes.
@@ -660,10 +664,17 @@ class OverlayRenderer:
     ) -> None:
         if anchor is None or anchor.point is None or anchor.rect is None:
             return
+        if anchor.source != "detection" and anchor.missing_frames > self._config.visual_hold_frames:
+            return
 
         point = anchor.point
         rect = anchor.rect
         scale = self._ui_scale(frame)
+        fade = 1.0
+        if anchor.source != "detection":
+            fade = max(0.20, 1.0 - anchor.missing_frames / (self._config.visual_hold_frames + 1))
+        plate_color = self._faded_color(PLATE_BOX_COLOR, fade)
+        hub_color = self._faded_color(HUB_COLOR, fade)
 
         display_rect = getattr(anchor, "display_rect", None)
         if display_rect is not None:
@@ -692,10 +703,10 @@ class OverlayRenderer:
             y2 = int(min(frame.shape[0] - 1, center_y + half_h))
 
         if self._config.plate_box_style == "corners":
-            self._draw_corner_box(frame, x1, y1, x2, y2, PLATE_BOX_COLOR, scale)
+            self._draw_corner_box(frame, x1, y1, x2, y2, plate_color, scale)
         else:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), PLATE_BOX_COLOR, max(1, int(2.4 * scale)), cv2.LINE_AA)
-        self._label_pill(frame, "Plate", (x1, y1), PLATE_BOX_COLOR)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), plate_color, max(1, int(2.4 * scale)), cv2.LINE_AA)
+        self._label_pill(frame, "Plate", (x1, y1), plate_color)
 
         if debug_anchor:
             cv2.line(frame, (int(point.x), 0), (int(point.x), frame.shape[0] - 1), ACCENT_SOFT, 1, cv2.LINE_AA)
@@ -710,16 +721,20 @@ class OverlayRenderer:
         hub_y1 = max(0, int(hub_rect.y1))
         hub_x2 = min(frame.shape[1] - 1, int(hub_rect.x2))
         hub_y2 = min(frame.shape[0] - 1, int(hub_rect.y2))
-        cv2.rectangle(frame, (hub_x1, hub_y1), (hub_x2, hub_y2), HUB_COLOR, max(1, int(2 * scale)), cv2.LINE_AA)
+        cv2.rectangle(frame, (hub_x1, hub_y1), (hub_x2, hub_y2), hub_color, max(1, int(2 * scale)), cv2.LINE_AA)
         # Label the hub to the right of its box so it never sits on top of the "Plate" pill.
-        self._label_pill(frame, "Bar", (hub_x2 + max(4, int(6 * scale)), hub_y1), HUB_COLOR, prefer_above=False)
+        self._label_pill(frame, "Bar", (hub_x2 + max(4, int(6 * scale)), hub_y1), hub_color, prefer_above=False)
         cv2.circle(frame, (int(point.x), int(point.y)), max(3, int(4 * scale)), (245, 245, 245), -1, cv2.LINE_AA)
-        cv2.circle(frame, (int(point.x), int(point.y)), max(6, int(9 * scale)), HUB_COLOR, max(1, int(2 * scale)), cv2.LINE_AA)
+        cv2.circle(frame, (int(point.x), int(point.y)), max(6, int(9 * scale)), hub_color, max(1, int(2 * scale)), cv2.LINE_AA)
 
         if not debug_anchor:
             return
 
         self._draw_anchor_debug_label(frame, anchor, x1, y1)
+
+    @staticmethod
+    def _faded_color(color: tuple[int, int, int], alpha: float) -> tuple[int, int, int]:
+        return tuple(int(channel * alpha + 38 * (1.0 - alpha)) for channel in color)
 
     def _draw_anchor_debug_label(self, frame: Frame, anchor: BarAnchorState, x1: int, y1: int) -> None:
         label = (
@@ -1001,6 +1016,7 @@ class OverlayRenderer:
         rep_reports: list[RepReport],
         frame_history: list[int],
         max_abs_override: float | None = None,
+        video_fps: float = 30.0,
     ) -> int:
         """Draw the multi-anchor velocity chart and return its top y so the rep
         table can stack above it without overlapping."""
@@ -1026,11 +1042,20 @@ class OverlayRenderer:
 
         self._rounded_panel(frame, x1, y1, x2, y2, alpha=0.66, radius=max(6, int(12 * scale)), accent=ACCENT)
 
-        window_size = min(140, max(len(values) for _, _, _, values in series))
+        newest_frame = frame_history[-1] if frame_history else max(len(values) for _, _, _, values in series) - 1
+        window_start_frame = newest_frame - int(round(self._config.velocity_window_seconds * max(1.0, video_fps)))
+        if frame_history:
+            start_index = next(
+                (index for index, frame_index in enumerate(frame_history) if frame_index >= window_start_frame),
+                max(0, len(frame_history) - 1),
+            )
+        else:
+            start_index = max(0, max(len(values) for _, _, _, values in series) - int(round(self._config.velocity_window_seconds * max(1.0, video_fps))))
+        window_size = max(1, max(len(values) for _, _, _, values in series) - start_index)
         all_values = [
             value
             for _, _, _, values in series
-            for value in values[-window_size:]
+            for value in values[start_index:]
             if np.isfinite(value)
         ]
         if len(all_values) < 2:
@@ -1043,7 +1068,7 @@ class OverlayRenderer:
         else:
             max_abs = max(0.75, max(abs(value) for value in all_values))
         zero_y = int(plot_y1 + plot_h / 2)
-        self._draw_rep_bands(frame, rep_reports, frame_history[-window_size:], plot_x1, plot_y1, plot_x2, plot_y2)
+        self._draw_rep_bands(frame, rep_reports, frame_history[start_index:], plot_x1, plot_y1, plot_x2, plot_y2)
         cv2.line(frame, (plot_x1, zero_y), (plot_x2, zero_y), PANEL_BORDER, 1, cv2.LINE_AA)
 
         if not compact:
@@ -1068,10 +1093,10 @@ class OverlayRenderer:
 
         half_plot = plot_h * 0.40  # leaves headroom so peaks don't touch the panel edge
         for key, _, color, values in series:
-            visible_values = values[-window_size:]
-            # Interpolate short NaN gaps so the curve stays continuous when the
-            # tracker briefly loses the bar (hands crossing the plate, etc.).
-            interpolated = self._interpolate_gaps(visible_values, max_gap=6)
+            visible_values = values[start_index:]
+            # Missing measurements are intentionally visible as gaps.  Inventing a
+            # curve through an occluded hub makes the graph look delayed or false.
+            interpolated = self._interpolate_gaps(visible_values, max_gap=0)
             points: list[tuple[int, int] | None] = []
             for index, value in enumerate(interpolated):
                 x = int(plot_x1 + index * (plot_x2 - plot_x1) / max(1, len(interpolated) - 1))

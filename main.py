@@ -11,6 +11,7 @@ from statistics import median, quantiles
 import cv2
 import numpy as np
 
+from analysis_profiles import ANALYSIS_PROFILES, get_analysis_profile
 from anchor_metrics import ANCHOR_GROUPS, AnchorVelocity, AnchorVelocityTracker, smooth_series
 from bar_anchor import (
     BarMeasurementGate,
@@ -35,8 +36,12 @@ from io_video import (
     measure_video_fps,
     process_video_two_pass,
     read_video_metadata,
+    resolve_output_geometry,
 )
+from inference import InferenceTransform
+from kinematics import BarMeasurement, ReconstructedBarSample, reconstruct_bar_kinematics
 from load_estimation import LoadEstimate
+from mask_cache import MaskFrameCache
 from metrics import (
     EXERCISE_DISPLACEMENT_DEFAULTS,
     BiomechanicsConfig,
@@ -44,10 +49,11 @@ from metrics import (
     KinematicSample,
     get_exercise_profile,
 )
-from pose import PoseResult, YoloPoseEstimator, create_pose_estimator, refine_pose_with_mask
+from pose import HybridPoseEstimator, PoseResult, YoloPoseEstimator, create_pose_estimator, refine_pose_with_mask
+from rep_review import RepDecision, decide_rep_validations
 from reporting import AnalysisReport, RepReportBuilder, write_csv_report, write_json_report
 from render_overlay import OverlayConfig, OverlayRenderer
-from segmentation import create_segmenter
+from segmentation import SegmentationResult, create_segmenter, select_subject_mask
 from technique import TechniqueAssessment, TechniqueMonitor
 from track import PointTracker
 from validation_outputs import create_validation_run, save_validation_screenshots
@@ -61,19 +67,21 @@ BarPathPoint = tuple[float, float] | None
 
 @dataclass
 class FrameRecord:
-    """Per-frame analysis result cached during pass 1 so pass 2 can render the overlay
-    without re-running pose/bar inference. Segmentation is the only model re-run in pass 2
-    (it needs the frame pixels), so it is not stored here."""
+    """Per-frame result cached in pass 1 and completed after kinematic replay."""
 
     pose: PoseResult
+    raw_pose: PoseResult
     detections: list[Detection]
-    sample: KinematicSample | None
-    technique: TechniqueAssessment | None
-    bar_anchor: BarAnchorState | None
-    load_estimate: LoadEstimate | None
+    sample: KinematicSample | None = None
+    technique: TechniqueAssessment | None = None
+    bar_anchor: BarAnchorState | None = None
+    load_estimate: LoadEstimate | None = None
+    measurement: BarMeasurement | None = None
+    depth_ok: bool | None = None
+    lockout_ok: bool | None = None
     anchor_velocities: list[AnchorVelocity] = field(default_factory=list)
     bar_path: list[BarPathPoint] = field(default_factory=list)
-    history_len: int = 0
+    mask_cached: bool = False
 
 
 def estimate_plate_diameter_from_video(input_path: Path, max_frames: int = 120) -> float | None:
@@ -339,9 +347,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True, type=Path, help="Path to save the analyzed video.")
     parser.add_argument(
         "--pose-backend",
-        choices=["mediapipe", "yolo"],
-        default="yolo",
-        help="Pose backend. YOLO is recommended for the current MVP.",
+        choices=["auto", "mediapipe", "yolo"],
+        default="auto",
+        help="Pose backend. Auto locks the athlete with YOLO and uses MediaPipe when it agrees.",
     )
     parser.add_argument(
         "--pose-model",
@@ -368,9 +376,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--plate-diameter-px",
-        required=True,
+        default=None,
         type=float,
-        help="Olympic plate diameter measured in pixels for this camera setup.",
+        help="Manual Olympic plate diameter in pixels; used only for manual calibration or auto fallback.",
+    )
+    parser.add_argument(
+        "--calibration-mode",
+        choices=["auto", "manual"],
+        default="auto",
+        help="Auto estimates the plate size from trained detections; manual requires --plate-diameter-px.",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=tuple(ANALYSIS_PROFILES),
+        default="balanced",
+        help="Inference preset. Balanced keeps the 720p overlay while reducing model work.",
+    )
+    parser.add_argument(
+        "--velocity-window-seconds",
+        default=None,
+        type=float,
+        help="Seconds visible in the synchronized velocity graph. Defaults to the selected profile.",
     )
     parser.add_argument(
         "--max-frames",
@@ -805,7 +831,7 @@ def _should_refresh_athlete_lock(
     return current_area >= previous_area * 0.55
 
 
-def main() -> None:
+def _legacy_main() -> None:
     args = build_parser().parse_args()
     if args.load_kg is not None and args.load_kg <= 0:
         raise SystemExit("--load-kg debe ser mayor que 0.")
@@ -1365,6 +1391,495 @@ def main() -> None:
             print(f"Mobile MP4: {args.mobile_output}")
         except RuntimeError as exc:
             print(f"Mobile MP4 skipped: {exc}")
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    profile = get_analysis_profile(args.profile)
+    velocity_window_seconds = args.velocity_window_seconds or profile.velocity_window_seconds
+    if args.load_kg is not None and args.load_kg <= 0:
+        raise SystemExit("--load-kg debe ser mayor que 0.")
+    if args.calibration_mode == "manual" and (args.plate_diameter_px is None or args.plate_diameter_px <= 0):
+        raise SystemExit("La calibración manual requiere --plate-diameter-px mayor que 0.")
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    validation_paths = (
+        create_validation_run(args.validation_run_label)
+        if args.validation_run_label is not None
+        else None
+    )
+    output_path = (
+        validation_paths.videos_dir / f"{validation_paths.run_id}.mp4"
+        if validation_paths is not None
+        else args.output
+    )
+    report_json_path = args.report_json
+    report_csv_path = args.report_csv
+    if validation_paths is not None:
+        report_json_path = report_json_path or validation_paths.reports_dir / "analysis_report.json"
+        report_csv_path = report_csv_path or validation_paths.reports_dir / "reps.csv"
+
+    input_metadata = read_video_metadata(args.input)
+    measured_fps = measure_video_fps(args.input)
+    fps_source = "reported"
+    if measured_fps is not None and abs(measured_fps - input_metadata.fps) > 0.5:
+        input_metadata = VideoMetadata(
+            width=input_metadata.width,
+            height=input_metadata.height,
+            fps=measured_fps,
+            frame_count=input_metadata.frame_count,
+            codec=input_metadata.codec,
+        )
+        fps_source = "measured"
+    output_geometry = resolve_output_geometry(
+        input_metadata,
+        target_resolution=args.max_resolution,
+        output_mode=args.output_format,
+    )
+    inference_transform = InferenceTransform.from_output_geometry(
+        output_geometry,
+        profile.inference_max_side,
+    )
+
+    object_model_path = _resolve_object_model_path(args.object_model, args.disable_trained_object_model)
+    trained_detector: YoloObjectDetector | None = None
+    if object_model_path is not None:
+        try:
+            trained_detector = YoloObjectDetector(
+                model_path=object_model_path,
+                confidence_threshold=args.object_confidence,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"No pude cargar el modelo de barra {object_model_path}: {exc}")
+            object_model_path = None
+
+    heuristic_enabled = _plate_heuristic_enabled(
+        args.disable_plate_heuristic,
+        args.enable_plate_heuristic,
+        trained_detector,
+    )
+    processing_scale = _processing_scale_from_video(args.input, args.max_resolution, args.output_format)
+    auto_calibration_diameter_px: float | None = None
+    manual_diameter = args.plate_diameter_px
+    auto_requested = args.calibration_mode == "auto" and not args.disable_auto_calibration
+    if auto_requested:
+        calibration_fallback = _create_heuristic_object_detector(None) if heuristic_enabled else None
+        if trained_detector is not None:
+            auto_calibration_diameter_px = estimate_plate_diameter_from_model_boxes(
+                args.input, trained_detector, fps=input_metadata.fps
+            )
+        if auto_calibration_diameter_px is None and (trained_detector is not None or calibration_fallback is not None):
+            auto_calibration_diameter_px = estimate_plate_diameter_from_tracker(
+                args.input,
+                trained_detector,
+                calibration_fallback,
+                fps=input_metadata.fps,
+            )
+        if auto_calibration_diameter_px is None and heuristic_enabled:
+            auto_calibration_diameter_px = estimate_plate_diameter_from_video(args.input)
+
+    if auto_calibration_diameter_px is not None:
+        calibration_diameter_px: float | None = auto_calibration_diameter_px * processing_scale
+    elif manual_diameter is not None and manual_diameter > 0:
+        calibration_diameter_px = manual_diameter
+    else:
+        calibration_diameter_px = None
+    metric_enabled = calibration_diameter_px is not None
+    # A non-metric fallback keeps visual tracking available.  It is never used to
+    # emit speed, ROM, or repetitions when calibration was not established.
+    calibration = create_calibration_from_plate_diameter(calibration_diameter_px or 120.0)
+
+    fallback_object_detector = None
+    object_detector_name = "none"
+    if trained_detector is not None:
+        object_detector = trained_detector
+        if heuristic_enabled:
+            fallback_object_detector = _create_heuristic_object_detector(None)
+            object_detector_name = f"yolo+heuristic:{object_model_path}"
+        else:
+            object_detector_name = f"yolo:{object_model_path}"
+    elif heuristic_enabled:
+        object_detector = _create_heuristic_object_detector(calibration_diameter_px)
+        object_detector_name = "heuristic"
+    else:
+        object_detector = None
+    use_object_tracking = object_detector is not None and _object_tracking_enabled(args, object_detector)
+    _announce_object_detector(object_model_path, trained_detector, object_detector)
+
+    pose_estimator = create_pose_estimator(
+        backend=args.pose_backend,
+        model_path=args.pose_model,
+        fps=input_metadata.fps,
+    )
+    analysis_segmenter = create_segmenter(
+        backend=args.segmentation_backend,
+        model_path=args.segmentation_model,
+        athlete_lock=args.athlete_lock,
+        use_grabcut=args.use_grabcut,
+    )
+    bar_anchor_tracker = BarAnchorTracker(fps=input_metadata.fps)
+    measurement_gate = BarMeasurementGate(
+        requires_hub=args.measurement_requires_hub,
+        hub_confidence_threshold=args.hub_confidence_threshold,
+    )
+    exercise_profile = get_exercise_profile(args.exercise)
+    min_disp_default, max_disp_default = EXERCISE_DISPLACEMENT_DEFAULTS[args.exercise]
+    biomechanics_config = BiomechanicsConfig(
+        min_rep_displacement_m=(
+            args.min_rep_displacement_m if args.min_rep_displacement_m is not None else min_disp_default
+        ),
+        max_reasonable_rep_displacement_m=max_disp_default,
+        min_rep_frames=args.min_rep_frames,
+        min_gap_between_completed_reps_frames=args.min_rep_gap_frames,
+    )
+    engine = BiomechanicsEngine(fps=input_metadata.fps, config=biomechanics_config, profile=exercise_profile)
+    renderer = OverlayRenderer(
+        OverlayConfig(
+            plate_box_style=args.plate_box_style,
+            velocity_chart_mode=args.velocity_chart,
+            body_velocity_display=args.body_velocity_display,
+            velocity_window_seconds=velocity_window_seconds,
+        )
+    )
+    manual_load_estimate = _manual_load_estimate(args.load_kg)
+    timeline: dict[int, FrameRecord] = {}
+    analysis: dict[str, object] = {
+        "total_reps": 0,
+        "rep_reports": [],
+        "accepted_reports": [],
+        "lockout_frames": [],
+        "velocity_history": {"bar": []},
+        "velocity_frame_history": [],
+        "chart_max_abs": 0.75,
+        "decisions": [],
+    }
+    stats = {"frames": 0, "tracked_frames": 0, "object_frames": 0, "hub_reliable_frames": 0}
+    tracking_state: dict[str, object] = {"athlete_locked": False, "lock_refresh_frame": 0, "athlete_box": None}
+    anchor_diagnostics: list[dict[str, object]] = []
+    seg_state: dict[str, object] = {"last_mask": None, "last_seg_frame": None}
+
+    def _set_pose_bar_hint() -> None:
+        if not isinstance(pose_estimator, (YoloPoseEstimator, HybridPoseEstimator)):
+            return
+        hub = bar_anchor_tracker.state.point
+        if hub is None:
+            pose_estimator.set_preferred_bar_center(None)
+            return
+        pose_estimator.set_preferred_bar_center(inference_transform.point_to_inference(hub.x, hub.y))
+
+    with MaskFrameCache() as mask_cache:
+        def analyze_frame(frame: Frame, frame_index: int) -> None:
+            _set_pose_bar_hint()
+            inference_frame = inference_transform.prepare(frame)
+            raw_pose_small = pose_estimator.estimate(inference_frame)
+
+            if frame_index % profile.segmentation_stride == 0 or seg_state["last_mask"] is None:
+                yolo_mask = analysis_segmenter.segment(inference_frame, raw_pose_small)
+                candidates = [yolo_mask]
+                if raw_pose_small.segmentation_mask is not None:
+                    candidates.append(
+                        SegmentationResult(
+                            mask=raw_pose_small.segmentation_mask,
+                            backend="mediapipe-mask",
+                            confidence=0.80,
+                        )
+                    )
+                small_mask = select_subject_mask(candidates, raw_pose_small).mask
+                athlete_mask = inference_transform.mask_to_output(small_mask)
+            else:
+                athlete_mask = _warp_mask_with_optical_flow(
+                    seg_state["last_seg_frame"], frame, seg_state["last_mask"]
+                )
+            seg_state["last_mask"] = athlete_mask
+            seg_state["last_seg_frame"] = frame.copy()
+            if athlete_mask is not None:
+                mask_cache.put(frame_index, athlete_mask)
+
+            raw_pose = inference_transform.pose_to_output(raw_pose_small)
+            pose = refine_pose_with_mask(raw_pose, athlete_mask)
+            if isinstance(pose_estimator, (YoloPoseEstimator, HybridPoseEstimator)) and pose.detected:
+                person_box = pose_estimator.get_person_box()
+                if person_box is not None:
+                    x1, y1 = inference_transform.point_to_output(person_box[0], person_box[1])
+                    x2, y2 = inference_transform.point_to_output(person_box[2], person_box[3])
+                    person_box_output = (x1, y1, x2, y2)
+                    previous_box = tracking_state["athlete_box"]
+                    if _should_refresh_athlete_lock(person_box_output, previous_box if isinstance(previous_box, tuple) else None):
+                        if not tracking_state["athlete_locked"] or frame_index - int(tracking_state["lock_refresh_frame"]) >= 30:
+                            pose_estimator.lock_to_person(person_box)
+                            tracking_state["athlete_locked"] = True
+                            tracking_state["lock_refresh_frame"] = frame_index
+                            tracking_state["athlete_box"] = person_box_output
+
+            if use_object_tracking and isinstance(object_detector, YoloObjectDetector):
+                small_detections = object_detector.detect_with_tracking(inference_frame, tracker_config=args.tracker_config)
+            elif object_detector is not None:
+                small_detections = object_detector.detect(inference_frame)
+            else:
+                small_detections = []
+            if not small_detections and fallback_object_detector is not None:
+                small_detections = fallback_object_detector.detect(inference_frame)
+            detections = inference_transform.detections_to_output(small_detections)
+            detections = _filter_detections_near_bar(detections, pose, frame.shape)
+            bar_anchor_tracker.set_pose_hint(_bar_height_hint_from_pose(pose))
+            bar_anchor = bar_anchor_tracker.update(frame, detections)
+            raw_point = measurement_gate.point_for_measurement(bar_anchor) if metric_enabled else None
+            depth_ok, lockout_ok = _compute_ipf_flags_with_pose_fallback(args.exercise, pose, raw_pose)
+            measurement = BarMeasurement(
+                frame_index=frame_index,
+                time_seconds=frame_index / input_metadata.fps,
+                point=raw_point,
+                meters_per_pixel=calibration.meters_per_pixel,
+                confidence=bar_anchor.measurement_confidence,
+                measurable=raw_point is not None and metric_enabled,
+            )
+            stats["frames"] += 1
+            stats["tracked_frames"] += int(measurement.measurable)
+            stats["hub_reliable_frames"] += int(measurement.measurable)
+            stats["object_frames"] += int(bar_anchor.rect is not None and bar_anchor.source != "lost")
+            record = FrameRecord(
+                pose=pose,
+                raw_pose=raw_pose,
+                detections=detections,
+                bar_anchor=bar_anchor if (args.show_unmeasured_anchor or bar_anchor.measurable) else None,
+                load_estimate=manual_load_estimate,
+                measurement=measurement,
+                depth_ok=depth_ok,
+                lockout_ok=lockout_ok,
+                mask_cached=athlete_mask is not None,
+            )
+            timeline[frame_index] = record
+            if validation_paths is not None or args.debug_anchor:
+                anchor_diagnostics.append(
+                    {
+                        "frame": frame_index,
+                        "source": bar_anchor.source,
+                        "plate_confidence": round(float(bar_anchor.plate_confidence), 4),
+                        "hub_confidence": round(float(bar_anchor.hub_confidence), 4),
+                        "measurement_confidence": round(float(bar_anchor.measurement_confidence), 4),
+                        "measurable": bool(measurement.measurable),
+                        "missing_frames": int(bar_anchor.missing_frames),
+                    }
+                )
+
+        def on_analysis_complete(frame_count: int) -> None:
+            measurements = [
+                timeline[index].measurement
+                for index in range(frame_count)
+                if index in timeline and timeline[index].measurement is not None
+            ]
+            reconstructed = reconstruct_bar_kinematics(
+                [measurement for measurement in measurements if measurement is not None],
+                fps=input_metadata.fps,
+            )
+            reconstructed_by_frame: dict[int, ReconstructedBarSample] = {
+                sample.frame_index: sample for sample in reconstructed
+            }
+            anchor_tracker = AnchorVelocityTracker(fps=input_metadata.fps, calibration=calibration)
+            technique_monitor = TechniqueMonitor(stable_frames=12, exercise=args.exercise)
+            report_builder = RepReportBuilder(
+                fps=input_metadata.fps,
+                velocity_loss_threshold_percent=args.velocity_loss_threshold,
+            )
+            histories: dict[str, list[float]] = {label: [] for label, _ in ANCHOR_GROUPS}
+            histories["bar"] = []
+            path: list[BarPathPoint] = []
+            evidence: dict[int, tuple[bool | None, bool | None]] = {}
+            max_horizontal = max(30.0, (calibration_diameter_px or 120.0) * 0.18)
+            last_path_point: tuple[float, float] | None = None
+
+            for frame_index in range(frame_count):
+                record = timeline.get(frame_index)
+                reconstructed_sample = reconstructed_by_frame.get(frame_index)
+                evidence[frame_index] = (
+                    record.depth_ok if record is not None else None,
+                    record.lockout_ok if record is not None else None,
+                )
+                anchor_values = {label: float("nan") for label, _ in ANCHOR_GROUPS}
+                if record is not None and reconstructed_sample is not None and reconstructed_sample.valid:
+                    anchor = record.bar_anchor
+                    sample = engine.update_reconstructed(
+                        frame_index=frame_index,
+                        position_m=float(reconstructed_sample.position_m),
+                        velocity_mps=float(reconstructed_sample.velocity_mps),
+                        hub_confidence=anchor.hub_confidence if anchor is not None else 0.0,
+                        plate_confidence=anchor.plate_confidence if anchor is not None else 0.0,
+                        tracking_source=anchor.source if anchor is not None else "offline",
+                    )
+                    record.sample = sample
+                    record.technique = technique_monitor.update(
+                        pose=record.pose,
+                        detections=record.detections,
+                        calibration=calibration,
+                        bar_velocity_mps=sample.smoothed_velocity_mps,
+                        lift_state=sample.state,
+                        rep_index=sample.rep_index,
+                    )
+                    record.anchor_velocities = anchor_tracker.update(record.pose)
+                    for value in record.anchor_velocities:
+                        anchor_values[value.name] = value.velocity_mps
+                    report_builder.add_sample(sample)
+                    point = reconstructed_sample.point
+                    if point is not None and (
+                        last_path_point is None or abs(point.x - last_path_point[0]) <= max_horizontal
+                    ):
+                        path.append((point.x, point.y))
+                        last_path_point = (point.x, point.y)
+                    elif path and path[-1] is not None:
+                        path.append(None)
+                        last_path_point = None
+                elif path and path[-1] is not None:
+                    path.append(None)
+                    last_path_point = None
+
+                for label, _ in ANCHOR_GROUPS:
+                    histories[label].append(anchor_values[label])
+                histories["bar"].append(
+                    float(reconstructed_sample.velocity_mps)
+                    if reconstructed_sample is not None and reconstructed_sample.valid and reconstructed_sample.velocity_mps is not None
+                    else float("nan")
+                )
+                if record is not None:
+                    record.bar_path = list(path)
+
+            engine.finalize(frame_count)
+            decisions = decide_rep_validations(
+                engine.validate_reps(), evidence, args.exercise, strict=args.strict_ipf_validation
+            )
+            reports = [
+                report_builder.build_rep_report(
+                    decision.rep,
+                    validation_status=decision.status,
+                    validation_reason=decision.reason,
+                )
+                for decision in decisions
+            ]
+            accepted_reports = [report for report in reports if report.validation_status == "accepted"]
+            analysis["decisions"] = decisions
+            analysis["rep_reports"] = reports
+            analysis["accepted_reports"] = accepted_reports
+            analysis["total_reps"] = len(accepted_reports)
+            analysis["lockout_frames"] = sorted(
+                decision.rep.lockout_frame for decision in decisions if decision.status == "accepted"
+            )
+            analysis["velocity_history"] = histories
+            analysis["velocity_frame_history"] = list(range(frame_count))
+            finite_values = [
+                abs(value)
+                for values in histories.values()
+                for value in values
+                if np.isfinite(value)
+            ]
+            analysis["chart_max_abs"] = float(max(0.75, np.percentile(finite_values, 95))) if finite_values else 0.75
+
+        def render_frame(frame: Frame, frame_index: int) -> Frame:
+            record = timeline.get(frame_index)
+            if record is None:
+                return frame
+            histories = analysis["velocity_history"]  # type: ignore[assignment]
+            sliced_history = {key: values[: frame_index + 1] for key, values in histories.items()}
+            frame_history = analysis["velocity_frame_history"][: frame_index + 1]  # type: ignore[index]
+            reps_done = bisect_right(analysis["lockout_frames"], frame_index)  # type: ignore[arg-type]
+            return renderer.render(
+                frame=frame,
+                pose=record.pose,
+                detections=record.detections,
+                sample=record.sample,
+                completed_reps=reps_done,
+                total_reps=analysis["total_reps"],  # type: ignore[arg-type]
+                technique=record.technique,
+                bar_path=record.bar_path,
+                anchor_velocity_history=sliced_history,
+                velocity_frame_history=frame_history,
+                chart_max_abs=analysis["chart_max_abs"],  # type: ignore[arg-type]
+                video_fps=input_metadata.fps,
+                anchor_velocities=record.anchor_velocities,
+                rep_reports=analysis["accepted_reports"],  # type: ignore[arg-type]
+                bar_anchor=record.bar_anchor,
+                subject_mask=mask_cache.get(frame_index),
+                load_estimate=record.load_estimate,
+                bar_drift_cm=_bar_path_horizontal_drift_cm(record.bar_path, calibration.meters_per_pixel),
+                debug_anchor=args.debug_anchor,
+            )
+
+        def on_progress(phase: str, current: int, total: int) -> None:
+            print(f"PROGRESS {phase} {current} {total}", flush=True)
+
+        try:
+            metadata = process_video_two_pass(
+                args.input,
+                output_path,
+                analyze_frame,
+                render_frame,
+                on_analysis_complete=on_analysis_complete,
+                max_frames=args.max_frames,
+                target_resolution=args.max_resolution,
+                output_mode=args.output_format,
+                progress_callback=on_progress,
+            )
+        finally:
+            pose_estimator.close()
+            analysis_segmenter.close()
+
+    mobile_conversion_warning: str | None = None
+    if not args.no_mobile_conversion:
+        try:
+            print("PROGRESS exporting 0 1", flush=True)
+            make_mobile_compatible_in_place(output_path, max_dimension=args.mobile_max_dimension)
+            print("PROGRESS exporting 1 1", flush=True)
+        except RuntimeError as exc:
+            mobile_conversion_warning = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            mobile_conversion_warning = f"Could not convert output to mobile-compatible MP4: {exc}"
+
+    decisions: list[RepDecision] = analysis["decisions"]  # type: ignore[assignment]
+    rep_reports = analysis["rep_reports"]  # type: ignore[assignment]
+    analysis_report = AnalysisReport(
+        input_path=str(args.input),
+        output_path=str(output_path),
+        fps=metadata.fps,
+        frame_count=metadata.frame_count,
+        tracked_frames=stats["tracked_frames"],
+        object_frames=stats["object_frames"],
+        completed_reps=int(analysis["total_reps"]),
+        reps=rep_reports,
+        hub_reliable_frames_pct=(stats["hub_reliable_frames"] / max(1, stats["frames"]) * 100),
+        reviewed_reps=sum(decision.status == "review" for decision in decisions),
+        rejected_reps=sum(decision.status == "rejected" for decision in decisions),
+    )
+    if report_json_path is not None:
+        write_json_report(analysis_report, report_json_path)
+        print(f"JSON report: {report_json_path}")
+    if report_csv_path is not None:
+        write_csv_report(rep_reports, report_csv_path)
+        print(f"CSV report: {report_csv_path}")
+    if validation_paths is not None and args.save_validation_screenshots:
+        screenshots = save_validation_screenshots(output_path, validation_paths.screenshots_dir, validation_paths.run_id)
+        print(f"Validation screenshots: {len(screenshots)}")
+    if validation_paths is not None and anchor_diagnostics:
+        diagnostics_path = validation_paths.reports_dir / "anchor_diagnostics.csv"
+        with diagnostics_path.open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=list(anchor_diagnostics[0].keys()))
+            writer.writeheader()
+            writer.writerows(anchor_diagnostics)
+
+    print("Analisis PowerNZ completado.")
+    print(f"Perfil: {profile.name}")
+    print(f"Input FPS: {metadata.fps:.2f} ({fps_source})")
+    print(f"Frames processed: {stats['frames']}")
+    print(f"Completed reps: {analysis['total_reps']}")
+    print(f"Reps requiring review: {analysis_report.reviewed_reps}")
+    print(f"Object detector: {object_detector_name}")
+    if calibration_diameter_px is None:
+        print("Calibration: unavailable; speed and rep metrics were not emitted.")
+    else:
+        print(f"Calibration plate diameter: {calibration_diameter_px:.1f}px")
+    print(f"Output: {output_path}")
+    if mobile_conversion_warning is not None:
+        print(f"Mobile conversion skipped: {mobile_conversion_warning}")
 
 
 if __name__ == "__main__":

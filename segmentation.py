@@ -22,6 +22,53 @@ class SegmentationResult:
     confidence: float
 
 
+def select_subject_mask(
+    candidates: list[SegmentationResult],
+    pose: PoseResult,
+    previous_mask: np.ndarray | None = None,
+) -> SegmentationResult:
+    """Choose the mask that best belongs to the currently locked athlete.
+
+    The score rewards confident masks that contain the pose landmarks and remain
+    continuous with the preceding frame.  It selects rather than blends masks,
+    avoiding the visible silhouette lag caused by temporal alpha mixing.
+    """
+    usable = [candidate for candidate in candidates if candidate.mask is not None and np.any(candidate.mask)]
+    if not usable:
+        return SegmentationResult(mask=None, backend="none", confidence=0.0)
+
+    pose_points = [
+        (int(keypoint.x), int(keypoint.y))
+        for keypoint in pose.keypoints
+        if keypoint.visibility >= 0.35
+    ]
+    best: SegmentationResult | None = None
+    best_score = -1.0
+    for candidate in usable:
+        assert candidate.mask is not None
+        mask = candidate.mask
+        if mask.ndim == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        height, width = mask.shape[:2]
+        contained = sum(
+            1
+            for x, y in pose_points
+            if 0 <= x < width and 0 <= y < height and mask[y, x] > 32
+        )
+        containment = contained / max(1, len(pose_points))
+        continuity = 1.0
+        if previous_mask is not None and previous_mask.shape == mask.shape:
+            intersection = np.count_nonzero((previous_mask > 32) & (mask > 32))
+            union = np.count_nonzero((previous_mask > 32) | (mask > 32))
+            continuity = 0.55 + 0.45 * (intersection / union if union else 0.0)
+        score = candidate.confidence * (0.45 + 0.55 * containment) * continuity
+        if score > best_score:
+            best_score = score
+            best = SegmentationResult(mask=mask, backend=candidate.backend, confidence=candidate.confidence)
+    assert best is not None
+    return best
+
+
 class Segmenter:
     def segment(self, frame: Frame, pose: PoseResult) -> SegmentationResult:
         ...

@@ -20,15 +20,15 @@ La app no intenta decidir como un juez humano completo. Usa una aproximacion 2D:
 El flujo actual es de dos pasadas.
 
 1. Normalizo cada frame al formato de salida. Por defecto uso `portrait-720`: lienzo `720x1280`, sin recortar, con el video centrado.
-2. Detecto pose con YOLO Pose o MediaPipe.
-3. Segmento el atleta con `powerai_athlete_seg.pt` si existe. Esa mascara no solo se dibuja: tambien se usa para corregir o bajar la confianza de landmarks que caen fuera del cuerpo.
+2. En modo automático, YOLO mantiene la identidad del atleta y MediaPipe aporta pose y máscara cuando sus landmarks coinciden con esa persona.
+3. Segmento el atleta con `powerai_athlete_seg.pt` si existe y selecciono la máscara más coherente con los landmarks. Esa máscara no solo se dibuja: también corrige o baja la confianza de puntos fuera del cuerpo.
 4. Detecto barra/discos con `powerai_bar_detector.pt`, clases `plate` y `bar_hub`.
 5. Filtro detecciones de barra cerca de las munecas para evitar discos del suelo o del fondo.
 6. El tracker de barra estabiliza el plato visible y exige `bar_hub` fiable para medir.
 7. Convierto pixeles a metros usando el diametro del disco olimpico: `0.45 m`.
-8. Calculo posicion vertical, velocidad, ROM, drift horizontal y fases del levantamiento.
-9. La maquina de estados cuenta solo reps validadas segun ejercicio.
-10. En la segunda pasada dibujo el overlay con escala de grafico estable y total de reps ya conocido.
+8. Reconstruyo la trayectoria de `bar_hub` al terminar la primera pasada: filtro saltos, mantengo huecos reales y calculo velocidad centrada sin desfase.
+9. Reproduzco las reglas del ejercicio y marco `review` si la evidencia de cámara/pose no es suficiente.
+10. En la segunda pasada dibujo el overlay con escala de gráfico estable, total conocido y máscaras cacheadas de la primera pasada.
 
 ## Modelos
 
@@ -36,7 +36,7 @@ Uso tres familias de modelos.
 
 - Barra: `powerai_bar_detector.pt`, YOLO detect, clases `plate` y `bar_hub`.
 - Atleta: `powerai_athlete_seg.pt`, YOLO segment, clase `athlete`.
-- Pose: YOLO Pose por defecto, MediaPipe como alternativa.
+- Pose: fusión automática de identidad YOLO y MediaPipe; cada backend sigue disponible para depuración.
 
 En esta v1 dejo el detector entrenado como autoridad principal. La heuristica por color solo entra si la pido con `--enable-plate-heuristic` o si no hay detector entrenado.
 

@@ -12,6 +12,7 @@ import numpy as np
 Frame = np.ndarray
 FrameProcessor = Callable[[Frame, int], Frame]
 FrameAnalyzer = Callable[[Frame, int], None]
+ProgressCallback = Callable[[str, int, int], None]
 OutputMode = Literal["portrait-720", "source"]
 
 
@@ -193,6 +194,15 @@ def _resolve_output_geometry(
     return OutputGeometry(original_metadata, 1.0, original_width, original_height)
 
 
+def resolve_output_geometry(
+    original_metadata: VideoMetadata,
+    target_resolution: int = 0,
+    output_mode: OutputMode = "source",
+) -> OutputGeometry:
+    """Public geometry helper shared by the renderer and inference resizer."""
+    return _resolve_output_geometry(original_metadata, target_resolution, output_mode)
+
+
 def _apply_output_geometry(frame: Frame, geometry: OutputGeometry) -> Frame:
     if not geometry.needs_resize:
         return frame
@@ -248,6 +258,7 @@ def process_video_two_pass(
     max_frames: int = 0,
     target_resolution: int = 0,
     output_mode: OutputMode = "source",
+    progress_callback: ProgressCallback | None = None,
 ) -> VideoMetadata:
     """Procesa el video dos veces para dibujar el overlay con el clip ya analizado.
 
@@ -259,11 +270,14 @@ def process_video_two_pass(
     with VideoReader(input_path) as reader:
         geometry = _resolve_output_geometry(reader.metadata, target_resolution, output_mode)
         analyzed_frames = 0
+        total_frames = min(reader.metadata.frame_count, max_frames) if max_frames > 0 else reader.metadata.frame_count
         for frame_index, frame in reader.frames():
             if max_frames > 0 and frame_index >= max_frames:
                 break
             analyze_frame(_apply_output_geometry(frame, geometry), frame_index)
             analyzed_frames += 1
+            if progress_callback is not None and (frame_index % 10 == 0 or frame_index + 1 == total_frames):
+                progress_callback("analyzing", frame_index + 1, total_frames)
 
     if on_analysis_complete is not None:
         on_analysis_complete(analyzed_frames)
@@ -271,11 +285,14 @@ def process_video_two_pass(
     with VideoReader(input_path) as reader:
         geometry = _resolve_output_geometry(reader.metadata, target_resolution, output_mode)
         metadata = geometry.metadata
+        total_frames = min(reader.metadata.frame_count, max_frames) if max_frames > 0 else reader.metadata.frame_count
         with VideoWriter(output_path, metadata) as writer:
             for frame_index, frame in reader.frames():
                 if max_frames > 0 and frame_index >= max_frames:
                     break
                 writer.write(render_frame(_apply_output_geometry(frame, geometry), frame_index))
+                if progress_callback is not None and (frame_index % 10 == 0 or frame_index + 1 == total_frames):
+                    progress_callback("rendering", frame_index + 1, total_frames)
 
     return metadata
 
