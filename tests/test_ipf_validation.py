@@ -7,6 +7,7 @@ import pytest
 
 from anchor_metrics import smooth_series
 from biomech_angles import (
+    bench_elbow_depth_ok,
     compute_ipf_flags,
     elbow_angle_deg,
     knee_angle_deg,
@@ -53,10 +54,52 @@ def test_compute_ipf_flags_squat_depth():
     depth_ok, _ = compute_ipf_flags("squat", deep)
     assert depth_ok is True  # ~90 deg knee = parallel
 
-    shallow = _pose({"left_hip": (0.0, 0.0), "left_knee": (0.0, 1.0), "left_ankle": (0.0, 2.0)})
+    shallow = _pose(
+        {
+            "left_shoulder": (0.0, -1.0),
+            "left_hip": (0.0, 0.0),
+            "left_knee": (0.0, 1.0),
+            "left_ankle": (0.0, 2.0),
+        }
+    )
     depth_ok, lockout_ok = compute_ipf_flags("squat", shallow)
     assert depth_ok is False  # straight knee, not deep
     assert lockout_ok is True  # standing = locked out
+
+
+def test_compute_ipf_flags_bench_requires_bottom_and_lockout():
+    bottom_points = {
+        "left_shoulder": (100.0, 100.0),
+        "left_elbow": (100.0, 132.0),
+        "left_wrist": (132.0, 132.0),
+    }
+    top_points = {
+        "left_shoulder": (100.0, 100.0),
+        "left_elbow": (100.0, 132.0),
+        "left_wrist": (100.0, 164.0),
+    }
+    high_partial_points = {
+        "left_shoulder": (100.0, 100.0),
+        "left_elbow": (100.0, 82.0),
+        "left_wrist": (132.0, 82.0),
+    }
+
+    bottom = _pose(bottom_points)
+    top = _pose(top_points)
+    high_partial = _pose(high_partial_points)
+
+    assert bench_elbow_depth_ok(_kpmap(bottom_points)) is True
+    depth_ok, lockout_ok = compute_ipf_flags("bench", bottom)
+    assert depth_ok is True
+    assert lockout_ok is False
+
+    depth_ok, lockout_ok = compute_ipf_flags("bench", top)
+    assert depth_ok is False
+    assert lockout_ok is True
+
+    depth_ok, lockout_ok = compute_ipf_flags("bench", high_partial)
+    assert depth_ok is False
+    assert lockout_ok is False
 
 
 def test_compute_ipf_flags_none_without_pose():
@@ -115,6 +158,27 @@ def test_deadlift_rep_rejects_early_velocity_dip_before_mature_pull():
         (2, 0.22, 0.0),  # enough range but too early to be a real lockout
         (3, 0.10, -0.2),
         (4, 0.02, 0.0),
+    ]
+
+    for frame_index, position_m, velocity_mps in samples:
+        machine.update(frame_index, position_m, velocity_mps, lockout_ok=True)
+
+    assert machine.completed_reps == []
+
+
+def test_deadlift_rep_rejects_downward_motion_before_lockout_even_if_recovered():
+    machine = LiftStateMachine(_deadlift_config())
+    samples = [
+        (0, 0.00, 0.0),
+        (1, 0.08, 0.2),
+        (2, 0.18, 0.2),
+        (3, 0.14, -0.2),  # downward motion before a valid finished position
+        (4, 0.12, -0.2),
+        (5, 0.25, 0.2),
+        (6, 0.25, 0.0),
+        (7, 0.25, 0.0),
+        (8, 0.05, -0.2),
+        (9, 0.00, 0.0),
     ]
 
     for frame_index, position_m, velocity_mps in samples:

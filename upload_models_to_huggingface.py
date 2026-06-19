@@ -5,10 +5,10 @@ from pathlib import Path
 
 
 DEFAULT_REPO_ID = "dzmbo/PowerNZ-Models"
-DEFAULT_SOURCE_DIR = Path(r"C:\Users\Juanda\Documents\PowerAI\models")
+DEFAULT_SOURCE_DIR = Path(r"C:\Users\Juanda\Documents\PowerNZ\models")
 MODEL_FILES = (
-    "powerai_bar_detector.pt",
-    "powerai_athlete_seg.pt",
+    "PowerNZ_bar_detector.pt",
+    "PowerNZ_athlete_seg.pt",
     "pose_landmarker_lite.task",
 )
 

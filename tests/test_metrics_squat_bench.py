@@ -27,6 +27,30 @@ def _run(positions: list[float], exercise: str, fps: float = 30.0) -> Biomechani
     return engine
 
 
+def _run_with_gates(
+    positions: list[float],
+    exercise: str,
+    depth_ok: list[bool] | bool = True,
+    lockout_ok: list[bool] | bool = True,
+    fps: float = 30.0,
+) -> BiomechanicsEngine:
+    profile = get_exercise_profile(exercise)
+    min_d, max_d = EXERCISE_DISPLACEMENT_DEFAULTS[exercise]
+    config = BiomechanicsConfig(min_rep_displacement_m=min_d, max_reasonable_rep_displacement_m=max_d)
+    engine = BiomechanicsEngine(fps=fps, config=config, profile=profile)
+    for index, position in enumerate(positions):
+        depth_flag = depth_ok[index] if isinstance(depth_ok, list) else depth_ok
+        lockout_flag = lockout_ok[index] if isinstance(lockout_ok, list) else lockout_ok
+        engine.update(
+            frame_index=index,
+            vertical_position_m=float(position),
+            depth_ok=depth_flag,
+            lockout_ok=lockout_flag,
+        )
+    engine.finalize(len(positions))
+    return engine
+
+
 def _down_then_up(top: float, bottom: float, rest: int = 12, span: int = 22, hold: int = 16) -> list[float]:
     return (
         [top] * rest
@@ -63,8 +87,49 @@ def test_bench_detects_one_rep_with_smaller_rom():
     assert 0.18 <= reps[0].displacement_m <= 0.35  # ~0.25 m bench ROM
 
 
+def test_bench_rejects_partial_without_enough_bar_range():
+    positions = _down_then_up(top=1.2, bottom=1.17)
+    engine = _run_with_gates(positions, exercise="bench", depth_ok=True, lockout_ok=True)
+
+    assert engine.validated_reps == []
+
+
+def test_bench_rejects_rep_without_bottom_depth():
+    positions = _down_then_up(top=1.2, bottom=0.95)
+    engine = _run_with_gates(positions, exercise="bench", depth_ok=False, lockout_ok=True)
+
+    assert engine.validated_reps == []
+
+
+def test_bench_rejects_rep_without_elbow_lockout():
+    positions = _down_then_up(top=1.2, bottom=0.95)
+    engine = _run_with_gates(positions, exercise="bench", depth_ok=True, lockout_ok=False)
+
+    assert engine.validated_reps == []
+
+
+def test_bench_counts_full_rep_with_depth_and_lockout():
+    positions = _down_then_up(top=1.2, bottom=0.95)
+    lockout_flags = [position >= 1.18 for position in positions]
+    engine = _run_with_gates(
+        positions,
+        exercise="bench",
+        depth_ok=True,
+        lockout_ok=lockout_flags,
+    )
+
+    assert len(engine.validated_reps) == 1
+
+
 def test_two_squat_reps_are_counted():
     # Real reps have a clear pause at the top between them; give the filters time to settle.
     cycle = _down_then_up(top=1.0, bottom=0.45, rest=18, span=22, hold=24)
     engine = _run(cycle + cycle, exercise="squat")
     assert len(engine.validated_reps) == 2
+
+
+def test_squat_rejects_depth_without_final_lockout():
+    positions = _down_then_up(top=1.0, bottom=0.45)
+    engine = _run_with_gates(positions, exercise="squat", depth_ok=True, lockout_ok=False)
+
+    assert engine.validated_reps == []

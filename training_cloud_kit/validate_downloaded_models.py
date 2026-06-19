@@ -25,19 +25,19 @@ class ValidationSummary:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Validate downloaded Kaggle models without integrating them into PowerAI."
+        description="Validate downloaded Kaggle models without integrating them into PowerNZ."
     )
     parser.add_argument(
         "--models-zip",
         type=Path,
         default=None,
-        help="Path to powerai_trained_models_v1.zip. Defaults to the newest matching ZIP in Downloads.",
+        help="Path to PowerNZ_trained_models_v1.zip. Defaults to the newest matching ZIP in Downloads.",
     )
     parser.add_argument(
         "--project-root",
         type=Path,
         default=Path(__file__).resolve().parents[1],
-        help="PowerAI project root.",
+        help="PowerNZ project root.",
     )
     parser.add_argument(
         "--work-dir",
@@ -88,8 +88,8 @@ def main() -> None:
     extracted_dir.mkdir(parents=True, exist_ok=True)
     extract_zip(models_zip, extracted_dir)
 
-    detector = find_model(extracted_dir, "powerai_bar_detector.pt")
-    athlete = find_optional_model(extracted_dir, "powerai_athlete_seg.pt")
+    detector = find_model(extracted_dir, "PowerNZ_bar_detector.pt")
+    athlete = find_optional_model(extracted_dir, "PowerNZ_athlete_seg.pt")
     load_yolo_model(detector)
     if athlete is not None:
         load_yolo_model(athlete)
@@ -131,11 +131,11 @@ def find_latest_downloaded_zip() -> Path:
     candidates: list[Path] = []
     for directory in (Path.home() / "Downloads", Path.cwd()):
         if directory.exists():
-            candidates.extend(directory.glob("powerai_trained_models*.zip"))
+            candidates.extend(directory.glob("PowerNZ_trained_models*.zip"))
     candidates = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)
     if not candidates:
         raise FileNotFoundError(
-            "No powerai_trained_models*.zip found. Pass --models-zip with the Kaggle download."
+            "No PowerNZ_trained_models*.zip found. Pass --models-zip with the Kaggle download."
         )
     return candidates[0]
 
@@ -181,8 +181,8 @@ def run_smoke(
 ) -> tuple[Path, Path]:
     if not video.exists():
         raise FileNotFoundError(f"Smoke video not found: {video}")
-    output_path = work_dir / "smoke_powerai_models.mp4"
-    report_path = work_dir / "smoke_powerai_models.json"
+    output_path = work_dir / "smoke_PowerNZ_models.mp4"
+    report_path = work_dir / "smoke_PowerNZ_models.json"
     command = [
         sys.executable,
         str(project_root / "main.py"),

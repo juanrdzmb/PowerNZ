@@ -49,7 +49,7 @@ python upload_models_to_huggingface.py
 Ese script crea el repo `dzmbo/PowerNZ-Models` si no existe y sube los tres archivos desde:
 
 ```text
-C:\Users\Juanda\Documents\PowerAI\models
+C:\Users\Juanda\Documents\PowerNZ\models
 ```
 
 Si quiero usar otro usuario u organizacion:

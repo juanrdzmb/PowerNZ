@@ -26,6 +26,9 @@ except ImportError:  # pragma: no cover - OpenCV font fallback is tested implici
     ImageFont = None
 
 
+BarPathPoint = tuple[float, float] | None
+
+
 POSE_EDGES = [
     ("left_shoulder", "right_shoulder"),
     ("left_shoulder", "left_elbow"),
@@ -277,10 +280,11 @@ class OverlayRenderer:
         completed_reps: int,
         bar_drift_cm: float | None,
         load_estimate: LoadEstimate | None,
+        rep_text: str | None = None,
     ) -> list[tuple[str, str]]:
         drift_val = "-" if bar_drift_cm is None else f"{bar_drift_cm:.1f} cm"
         stats = [
-            ("REP", f"{sample.rep_index}/{completed_reps}"),
+            ("REP", rep_text or str(completed_reps)),
             ("ROM", f"{sample.rep_displacement_m:.2f} m"),
             ("DRIFT", drift_val),
         ]
@@ -396,7 +400,7 @@ class OverlayRenderer:
         completed_reps: int = 0,
         total_reps: int | None = None,
         technique: TechniqueAssessment | None = None,
-        bar_path: list[tuple[float, float]] | None = None,
+        bar_path: list[BarPathPoint] | None = None,
         velocity_history: list[float] | None = None,
         anchor_velocity_history: dict[str, list[float]] | None = None,
         velocity_frame_history: list[int] | None = None,
@@ -799,49 +803,73 @@ class OverlayRenderer:
             cv2.line(frame, (cx, cy), (cx + dx * length, cy), color, thickness, cv2.LINE_AA)
             cv2.line(frame, (cx, cy), (cx, cy + dy * length), color, thickness, cv2.LINE_AA)
 
-    def _draw_bar_path(self, frame: Frame, bar_path: list[tuple[float, float]]) -> None:
-        if len(bar_path) < 2:
+    def _draw_bar_path(self, frame: Frame, bar_path: list[BarPathPoint]) -> None:
+        visible_points = [point for point in bar_path if point is not None]
+        if len(visible_points) < 2:
             return
 
-        points = bar_path[-150:]
-        if len(points) >= 3:
+        raw_segments: list[list[tuple[float, float]]] = []
+        current: list[tuple[float, float]] = []
+        for point in bar_path[-150:]:
+            if point is None:
+                if current:
+                    raw_segments.append(current)
+                    current = []
+                continue
+            current.append(point)
+        if current:
+            raw_segments.append(current)
+
+        scale = self._ui_scale(frame)
+        core_w = max(1, int(2 * scale))
+        glow_w = max(2, int(4 * scale))
+        max_jump = self._config.path_max_jump_pixels
+
+        def _smooth(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+            if len(points) < 3:
+                return points
             ema_alpha = 0.55
             smoothed = [points[0]]
             for i in range(1, len(points)):
                 sx = ema_alpha * points[i][0] + (1.0 - ema_alpha) * smoothed[i - 1][0]
                 sy = ema_alpha * points[i][1] + (1.0 - ema_alpha) * smoothed[i - 1][1]
                 smoothed.append((sx, sy))
-            points = smoothed
+            return smoothed
 
-        pts = [(int(x), int(y)) for x, y in points]
-        scale = self._ui_scale(frame)
-        core_w = max(1, int(2 * scale))
-        glow_w = max(2, int(4 * scale))
-        n = len(pts)
-        max_jump = self._config.path_max_jump_pixels
-
-        def _seg_ok(i: int) -> bool:
+        def _seg_ok(pts: list[tuple[int, int]], i: int) -> bool:
             horizontal = abs(pts[i][0] - pts[i - 1][0])
             total = float(np.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
             # Reject big jumps and side-to-side moves (a bar path is near-vertical).
             return total <= max_jump and horizontal <= max_jump * 0.6
 
-        for index in range(1, n):
-            if _seg_ok(index):
-                cv2.line(frame, pts[index - 1], pts[index], TRAJECTORY_GLOW, glow_w, cv2.LINE_AA)
-        for index in range(1, n):
-            if not _seg_ok(index):
+        last_pt: tuple[int, int] | None = None
+        for segment in raw_segments:
+            if len(segment) < 2:
+                if segment:
+                    last_pt = (int(segment[-1][0]), int(segment[-1][1]))
                 continue
-            age = index / max(1, n - 1)
-            fade = 0.35 + 0.65 * age
-            color = tuple(
-                int(TRAJECTORY_GLOW[k] + (TRAJECTORY_COLOR[k] - TRAJECTORY_GLOW[k]) * fade)
-                for k in range(3)
-            )
-            cv2.line(frame, pts[index - 1], pts[index], color, core_w, cv2.LINE_AA)
+            points = _smooth(segment)
+            pts = [(int(x), int(y)) for x, y in points]
+            n = len(pts)
+            last_pt = pts[-1]
 
-        cv2.circle(frame, pts[-1], max(3, int(4 * scale)), (255, 255, 255), -1, cv2.LINE_AA)
-        cv2.circle(frame, pts[-1], max(4, int(6 * scale)), TRAJECTORY_COLOR, max(1, int(1.5 * scale)), cv2.LINE_AA)
+            for index in range(1, n):
+                if _seg_ok(pts, index):
+                    cv2.line(frame, pts[index - 1], pts[index], TRAJECTORY_GLOW, glow_w, cv2.LINE_AA)
+            for index in range(1, n):
+                if not _seg_ok(pts, index):
+                    continue
+                age = index / max(1, n - 1)
+                fade = 0.35 + 0.65 * age
+                color = tuple(
+                    int(TRAJECTORY_GLOW[k] + (TRAJECTORY_COLOR[k] - TRAJECTORY_GLOW[k]) * fade)
+                    for k in range(3)
+                )
+                cv2.line(frame, pts[index - 1], pts[index], color, core_w, cv2.LINE_AA)
+
+        if last_pt is not None:
+            cv2.circle(frame, last_pt, max(3, int(4 * scale)), (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(frame, last_pt, max(4, int(6 * scale)), TRAJECTORY_COLOR, max(1, int(1.5 * scale)), cv2.LINE_AA)
 
     def _draw_bar_velocity_badge(
         self,
@@ -1292,7 +1320,7 @@ class OverlayRenderer:
         title_scale = max(0.5, 0.84 * scale)
         title_th = max(1, int(2 * scale))
         title_y = y1 + max(22, int(31 * scale))
-        self._text(frame, "PowerAI", (text_x, title_y), title_scale, ACCENT, title_th)
+        self._text(frame, "PowerNZ", (text_x, title_y), title_scale, ACCENT, title_th)
         if sample is not None:
             self._draw_state_pill(frame, sample.state, self._state_color(sample.state), x2 - pad, title_y, scale)
         div_y = title_y + max(8, int(13 * scale))
@@ -1335,7 +1363,7 @@ class OverlayRenderer:
 
         # --- Secondary stat blocks ---
         stat_y = hero_y + max(28, int(40 * scale))
-        stats = self._telemetry_stats(sample, completed_reps, bar_drift_cm, load_estimate)
+        stats = self._telemetry_stats(sample, completed_reps, bar_drift_cm, load_estimate, rep_text)
         col_w = (panel_width - pad * 2) / max(1, len(stats))
         for index, (caption, value) in enumerate(stats):
             self._draw_stat(frame, caption, value, int(text_x + col_w * index), stat_y, scale)

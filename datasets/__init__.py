@@ -1,1 +1,1 @@
-"""Dataset utilities for PowerAI training scripts."""
+"""Dataset utilities for PowerNZ training scripts."""

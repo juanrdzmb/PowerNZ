@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bar_anchor import BarAnchorTracker
+from bar_anchor import BarAnchorTracker, Point2D
 from detect_objects import Detection, TrackedDetection
 from pose import PoseKeypoint, PoseResult
 
@@ -84,6 +84,25 @@ def test_bar_anchor_pairs_tracked_hub_with_plate_rect() -> None:
     assert state.plate_confidence == pytest.approx(0.82)
 
 
+def test_bar_anchor_prefers_hub_pair_over_large_plate_only_candidate() -> None:
+    tracker = BarAnchorTracker(fps=30.0)
+
+    state = tracker.update(
+        _frame(),
+        [
+            Detection("plate", 0.96, 40.0, 40.0, 300.0, 300.0),
+            Detection("plate", 0.76, 360.0, 220.0, 460.0, 320.0),
+            Detection("bar_hub", 0.82, 398.0, 258.0, 422.0, 282.0),
+        ],
+    )
+
+    assert state.point is not None
+    assert state.hub_detected is True
+    assert state.measurable is True
+    assert state.point.x == pytest.approx(410.0)
+    assert state.point.y == pytest.approx(270.0)
+
+
 def test_bar_anchor_accepts_trained_hub_near_plate_edge() -> None:
     tracker = BarAnchorTracker(fps=30.0)
 
@@ -124,6 +143,24 @@ def test_bar_anchor_accepts_trained_hub_next_to_small_plate_box() -> None:
     assert state.point.y == pytest.approx(298.0)
     assert state.display_rect is not None
     assert state.display_rect.center.x == pytest.approx(200.0)
+
+
+def test_bar_anchor_rejects_edge_hub_farther_from_pose_hint_than_plate() -> None:
+    tracker = BarAnchorTracker(fps=30.0)
+    tracker.set_pose_hint(Point2D(350.0, 300.0))
+
+    state = tracker.update(
+        _frame(),
+        [
+            Detection("plate", 0.91, 155.0, 250.0, 245.0, 340.0),
+            Detection("bar_hub", 0.79, 84.0, 286.0, 108.0, 310.0),
+        ],
+    )
+
+    assert state.point is not None
+    assert state.hub_detected is False
+    assert state.measurable is False
+    assert state.point.x == pytest.approx(200.0)
 
 
 def test_bar_anchor_keeps_plate_visual_but_stops_measurement_when_hub_drops() -> None:
@@ -272,6 +309,28 @@ def test_bar_anchor_rejects_lateral_hub_switch_during_short_lock() -> None:
     assert state.point is not None
     assert state.source in {"hold", "optical_flow", "prediction"}
     assert state.point.x < 260.0
+
+
+def test_bar_anchor_does_not_switch_from_locked_hub_to_far_plate_only_detection() -> None:
+    tracker = BarAnchorTracker(fps=30.0)
+    first = tracker.update(
+        _frame(),
+        [
+            Detection("plate", 0.86, 120.0, 220.0, 280.0, 380.0),
+            Detection("bar_hub", 0.92, 188.0, 288.0, 212.0, 312.0),
+        ],
+    )
+
+    state = tracker.update(
+        _frame(),
+        [Detection("plate", 0.98, 430.0, 40.0, 590.0, 200.0)],
+    )
+
+    assert first.point is not None
+    assert state.point is not None
+    assert state.source in {"hold", "optical_flow", "prediction"}
+    assert state.point.x == pytest.approx(first.point.x, abs=6.0)
+    assert state.point.y == pytest.approx(first.point.y, abs=6.0)
 
 
 def test_bar_anchor_survives_short_detection_loss() -> None:

@@ -329,6 +329,7 @@ class BarAnchorTracker:
             return None
 
         if self._last_state.point is None or self._last_state.rect is None:
+            candidates = self._hub_backed_candidates(candidates) or candidates
             return max(
                 candidates,
                 key=lambda obs: self._initial_observation_score(obs)
@@ -390,6 +391,11 @@ class BarAnchorTracker:
                     # only allow a free re-acquire after a longer loss.
                     return None
 
+        if self._last_state.measurable:
+            hub_candidates = self._hub_backed_candidates(candidates)
+            if hub_candidates:
+                candidates = hub_candidates
+
         valid: list[tuple[float, AnchorObservation]] = []
 
         for candidate in candidates:
@@ -402,7 +408,12 @@ class BarAnchorTracker:
 
             continuity = max(0.0, 1.0 - distance / max(1.0, max_jump))
             is_hub = candidate.label in {"bar_hub", "bar_sleeve"}
-            label_bonus = 1.5 if is_hub else (1.2 if candidate.label == "plate" else 1.0)
+            if is_hub:
+                label_bonus = 1.85
+            elif self._last_state.measurable:
+                label_bonus = 0.80
+            else:
+                label_bonus = 1.05 if candidate.label == "plate" else 1.0
             hint_bonus = self._pose_hint_bonus(candidate, frame_width, frame_height)
             valid.append(
                 (candidate.confidence * label_bonus * (1.0 + continuity) * hint_bonus, candidate)
@@ -444,9 +455,24 @@ class BarAnchorTracker:
         previous_center = previous.center
         current_center = current.center
         last_size = max(previous.width, previous.height, 1.0)
+        current_size = max(current.width, current.height, 1.0)
+        size_ratio = current_size / last_size
+        if not 0.65 <= size_ratio <= 1.45:
+            return False
         dx = abs(current_center.x - previous_center.x)
         dy = abs(current_center.y - previous_center.y)
         return dx <= max(28.0, last_size * 0.38) and dy <= max(48.0, last_size * 0.95)
+
+    def _hub_backed_candidates(
+        self,
+        candidates: list[AnchorObservation],
+    ) -> list[AnchorObservation]:
+        return [
+            candidate
+            for candidate in candidates
+            if candidate.label in {"bar_hub", "bar_sleeve"}
+            and candidate.hub_confidence >= self._config.hub_confidence_threshold
+        ]
 
     def _pose_hint_bonus(
         self,
@@ -573,8 +599,7 @@ class BarAnchorTracker:
 
         return observations
 
-    @staticmethod
-    def _nearest_hub(plate: Detection, hubs: list[Detection]) -> Detection | None:
+    def _nearest_hub(self, plate: Detection, hubs: list[Detection]) -> Detection | None:
         if not hubs:
             return None
 
@@ -591,6 +616,12 @@ class BarAnchorTracker:
         nearby: list[tuple[float, Detection]] = []
         for hub in hubs:
             hub_x, hub_y = hub.center
+            outside_gap = max(plate.x1 - hub_x, hub_x - plate.x2, 0.0)
+            if outside_gap > 0.0 and self._pose_hint is not None:
+                plate_hint_distance = abs(plate_x - self._pose_hint.x)
+                hub_hint_distance = abs(hub_x - self._pose_hint.x)
+                if hub_hint_distance > plate_hint_distance + plate_size * 0.12:
+                    continue
             in_padded_plate = (
                 plate.x1 - pad_x <= hub_x <= plate.x2 + pad_x
                 and plate.y1 - pad_y <= hub_y <= plate.y2 + pad_y
@@ -600,7 +631,6 @@ class BarAnchorTracker:
                 nearby.append((distance, hub))
                 continue
 
-            outside_gap = max(plate.x1 - hub_x, hub_x - plate.x2, 0.0)
             lateral_to_edge = outside_gap > 0.0 and outside_gap <= lateral_reach
             vertically_aligned = abs(hub_y - plate_y) <= vertical_band
             if not (lateral_to_edge and vertically_aligned):
@@ -623,7 +653,7 @@ class BarAnchorTracker:
     @staticmethod
     def _initial_observation_score(observation: AnchorObservation) -> float:
         is_hub = observation.label in {"bar_hub", "bar_sleeve"}
-        label_bonus = 1.5 if is_hub else (1.2 if observation.label == "plate" else 1.0)
+        label_bonus = 1.85 if is_hub else (0.95 if observation.label == "plate" else 1.0)
         size_bonus = max(observation.rect.width, observation.rect.height) / 100.0
         return observation.confidence * label_bonus + size_bonus
 

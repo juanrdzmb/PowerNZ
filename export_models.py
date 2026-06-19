@@ -10,8 +10,8 @@ import numpy as np
 
 
 DEFAULT_MODELS = (
-    Path("models/powerai_bar_detector.pt"),
-    Path("models/powerai_athlete_seg.pt"),
+    Path("models/PowerNZ_bar_detector.pt"),
+    Path("models/PowerNZ_athlete_seg.pt"),
 )
 
 
@@ -27,7 +27,7 @@ class ExportResult:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Export PowerAI YOLO models for mobile/edge targets."
+        description="Export PowerNZ YOLO models for mobile/edge targets."
     )
     parser.add_argument(
         "--model",

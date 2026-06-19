@@ -9,10 +9,13 @@ from metrics import KinematicSample
 from main import (
     _append_visible_motion_history,
     _anchor_point_is_usable,
+    _compute_ipf_flags_with_pose_fallback,
     _filter_detections_near_bar,
+    _manual_load_estimate,
     _plate_heuristic_enabled,
     _reset_visible_motion_history,
     _sample_point_from_single_anchor,
+    _strict_ipf_gate,
 )
 from pose import PoseKeypoint, PoseResult
 
@@ -156,6 +159,41 @@ def test_plate_heuristic_is_strict_by_default_when_trained_detector_exists() -> 
     assert _plate_heuristic_enabled(False, True, trained_detector)
     assert not _plate_heuristic_enabled(True, True, trained_detector)
     assert _plate_heuristic_enabled(False, False, None)
+
+
+def test_manual_load_is_hidden_by_default_and_exact_when_set() -> None:
+    assert _manual_load_estimate(None) is None
+
+    estimate = _manual_load_estimate(142.5)
+
+    assert estimate is not None
+    assert estimate.total_kg == 142.5
+    assert estimate.side_weight_kg == 61.25
+    assert estimate.colors == ("manual",)
+    assert estimate.confidence == 1.0
+
+
+def test_strict_ipf_gate_rejects_unknown_pose_by_default() -> None:
+    assert _strict_ipf_gate(None, strict=True) is False
+    assert _strict_ipf_gate(None, strict=False) is True
+    assert _strict_ipf_gate(True, strict=True) is True
+    assert _strict_ipf_gate(False, strict=False) is False
+
+
+def test_ipf_flags_use_raw_pose_when_refined_pose_cannot_decide() -> None:
+    refined = PoseResult(keypoints=[], backend="yolo", detected=False)
+    raw = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_shoulder", 100.0, 100.0, 0.9),
+            PoseKeypoint("left_hip", 100.0, 180.0, 0.9),
+            PoseKeypoint("left_knee", 100.0, 260.0, 0.9),
+            PoseKeypoint("left_ankle", 100.0, 340.0, 0.9),
+        ],
+        backend="yolo",
+        detected=True,
+    )
+
+    assert _compute_ipf_flags_with_pose_fallback("deadlift", refined, raw) == (None, True)
 
 
 def test_filter_keeps_hub_near_kept_plate_even_when_far_from_wrist_center() -> None:

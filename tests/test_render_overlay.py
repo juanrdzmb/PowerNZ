@@ -56,11 +56,51 @@ def test_overlay_telemetry_stats_include_load_without_replacing_drift() -> None:
     )
 
     assert stats == [
-        ("REP", "2/1"),
+        ("REP", "1"),
         ("ROM", "0.42 m"),
         ("DRIFT", "3.4 cm"),
         ("CARGA", "120 kg"),
     ]
+
+
+def test_overlay_telemetry_stats_omit_load_by_default() -> None:
+    sample = KinematicSample(
+        frame_index=10,
+        time_seconds=0.33,
+        position_m=0.0,
+        velocity_mps=0.0,
+        smoothed_velocity_mps=0.0,
+        state="tirón",
+        rep_index=2,
+        rep_displacement_m=0.42,
+    )
+
+    stats = OverlayRenderer._telemetry_stats(
+        sample=sample,
+        completed_reps=1,
+        bar_drift_cm=3.4,
+        load_estimate=None,
+    )
+
+    assert stats == [
+        ("REP", "1"),
+        ("ROM", "0.42 m"),
+        ("DRIFT", "3.4 cm"),
+    ]
+
+
+def test_overlay_bar_path_breaks_on_missing_segments() -> None:
+    renderer = OverlayRenderer(OverlayConfig(background_dim_alpha=0.0, glow_strength=0.0))
+    frame = np.zeros((260, 260, 3), dtype=np.uint8)
+
+    renderer._draw_bar_path(
+        frame,
+        [(20.0, 30.0), (30.0, 40.0), None, (210.0, 40.0), (220.0, 50.0)],
+    )
+
+    assert frame[35, 25].sum() > 0
+    assert frame[45, 215].sum() > 0
+    assert frame[40, 120].sum() == 0
 
 
 def test_overlay_silhouette_alpha_is_attenuated() -> None:

@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 # ---------------------------------------------------------------------------
-# Arranca Label Studio en local para etiquetar los frames de PowerAI.
+# Arranca Label Studio en local para etiquetar los frames de PowerNZ.
 #
 # - Sirve las imagenes desde C:\Users\Juanda\Documents\Entrenamiento (local,
 #   nada sube a internet).
@@ -38,8 +38,8 @@ New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 $env:LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED = "true"
 $env:LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT   = $documentRoot
 $env:LABEL_STUDIO_BASE_DATA_DIR               = $dataDir
-$env:LABEL_STUDIO_USERNAME                    = "juanda@powerai.local"
-$env:LABEL_STUDIO_PASSWORD                    = "powerai-local-2026"
+$env:LABEL_STUDIO_USERNAME                    = "juanda@PowerNZ.local"
+$env:LABEL_STUDIO_PASSWORD                    = "PowerNZ-local-2026"
 $env:LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK = "true"
 
 Write-Host ""

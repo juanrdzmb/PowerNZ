@@ -1,4 +1,4 @@
-# Modelos De PowerAI
+# Modelos De PowerNZ
 
 Esta carpeta es el punto de entrada de los modelos locales. Los pesos no se versionan en Git, pero la app espera estos nombres.
 

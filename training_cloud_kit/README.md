@@ -1,15 +1,15 @@
-# PowerAI Cloud Training Kit
+# PowerNZ Cloud Training Kit
 
-Este kit esta separado del codigo principal de PowerAI. Sirve para preparar datos, entrenar modelos en Kaggle y validar los pesos descargados antes de integrarlos en la app.
+Este kit esta separado del codigo principal de PowerNZ. Sirve para preparar datos, entrenar modelos en Kaggle y validar los pesos descargados antes de integrarlos en la app.
 
 ## Que vamos a entrenar
 
-**Un solo modelo de barra** (`powerai_bar_detector.pt`) entrenado con frames de los **tres ejercicios** (peso muerto, sentadilla, press banca) y desde **multiples angulos**. Detecta dos clases: `plate` y `bar_hub`. Al ser un unico modelo multi-vista, sirve para los tres ejercicios; lo que cambia por ejercicio es la biomecanica en la app (flag `--exercise`), no el detector.
+**Un solo modelo de barra** (`PowerNZ_bar_detector.pt`) entrenado con frames de los **tres ejercicios** (peso muerto, sentadilla, press banca) y desde **multiples angulos**. Detecta dos clases: `plate` y `bar_hub`. Al ser un unico modelo multi-vista, sirve para los tres ejercicios; lo que cambia por ejercicio es la biomecanica en la app (flag `--exercise`), no el detector.
 
 Modelos objetivo:
 
-- `powerai_bar_detector.pt`: obligatorio. Detecta `plate` y `bar_hub`.
-- `powerai_athlete_seg.pt`: opcional/futuro. Segmenta el atleta si etiquetas mascaras (mismos frames).
+- `PowerNZ_bar_detector.pt`: obligatorio. Detecta `plate` y `bar_hub`.
+- `PowerNZ_athlete_seg.pt`: opcional/futuro. Segmenta el atleta si etiquetas mascaras (mismos frames).
 
 ## Camino actual: Roboflow -> Kaggle (recomendado)
 
@@ -22,7 +22,7 @@ El etiquetado se hace en Roboflow (o Label Studio local) en un unico proyecto co
    python training_cloud_kit\preparar_dataset_roboflow.py --roboflow-export "C:\ruta\al\export.zip"
    ```
 
-   Genera `training_cloud_kit\work\powerai_bar_v1_corrected.zip` (con `frames/` + `labels/` y clases `plate`=0, `bar_hub`=1). El script imprime el remapeo que aplico para que lo verifiques.
+   Genera `training_cloud_kit\work\PowerNZ_bar_v1_corrected.zip` (con `frames/` + `labels/` y clases `plate`=0, `bar_hub`=1). El script imprime el remapeo que aplico para que lo verifiques.
 3. **Entrena en Kaggle** (ver "Entrenar en Kaggle paso a paso" abajo) con `MODE='train'`.
 4. **Valida e integra** el modelo descargado (seccion 7).
 
@@ -33,23 +33,23 @@ El etiquetado se hace en Roboflow (o Label Studio local) en un unico proyecto co
 1. Crea cuenta en kaggle.com y verificala (telefono) para poder usar GPU.
 2. Arriba a la derecha: **Create > New Notebook**.
 3. Panel derecho **Session options**: Accelerator = **GPU T4 x2** (o P100) e **Internet = On**.
-4. **Add Input > Upload** (o *Datasets > New Dataset*): sube `powerai_bar_v1_corrected.zip` como dataset. Quedara en `/kaggle/input/...`.
-5. Sube tambien el script: arrastra `training_cloud_kit\kaggle_train_powerai.py` al notebook, o abre `kaggle_train_powerai.ipynb`.
+4. **Add Input > Upload** (o *Datasets > New Dataset*): sube `PowerNZ_bar_v1_corrected.zip` como dataset. Quedara en `/kaggle/input/...`.
+5. Sube tambien el script: arrastra `training_cloud_kit\kaggle_train_PowerNZ.py` al notebook, o abre `kaggle_train_PowerNZ.ipynb`.
 6. En la primera celda instala dependencias y ejecuta el entrenamiento:
 
    ```python
    !pip -q install ultralytics
-   !python kaggle_train_powerai.py --mode train
+   !python kaggle_train_PowerNZ.py --mode train
    ```
 
    (El script descubre solo el ZIP en `/kaggle/input`. Si Kaggle lo muestra ya descomprimido, pasa `--dataset-root /kaggle/input/<nombre>`.)
 7. Si se queda sin memoria, baja el batch: `--detector-batch 4`.
-8. Al terminar, en el panel derecho **Output** descarga `powerai_trained_models_v1.zip`.
+8. Al terminar, en el panel derecho **Output** descarga `PowerNZ_trained_models_v1.zip`.
 9. En tu PC, valida e integra (seccion 7 mas abajo).
 
 ### Integrar el modelo de barra en la app
 
-Copia `powerai_bar_detector.pt` a `models\powerai_bar_detector.pt`. La app lo detecta solo. Con el modelo entrenado presente conviene desactivar el heuristico de color para maxima precision:
+Copia `PowerNZ_bar_detector.pt` a `models\PowerNZ_bar_detector.pt`. La app lo detecta solo. Con el modelo entrenado presente conviene desactivar el heuristico de color para maxima precision:
 
 ```powershell
 python main.py --input video.mp4 --output salida.mp4 --exercise squat --disable-plate-heuristic
@@ -68,9 +68,9 @@ Mismo circuito, con poligonos en vez de cajas:
    python training_cloud_kit\preparar_dataset_roboflow.py --roboflow-export "C:\ruta\export_seg.zip" --task seg
    ```
 
-   Genera `powerai_athlete_v1_corrected.zip` con `frames/` + `masks/` (poligonos).
-3. Lo mas simple: como `kaggle_train_powerai.py` entrena detector y segmentacion en una sola pasada si el dataset tiene `labels/` **y** `masks/`, lo ideal es juntar las mascaras con el dataset de barra (mismos frames). Cuando llegues a este punto, pasame el export y preparo el merge; el resto del circuito (Kaggle, validacion) es identico.
-4. Al integrar, copia `powerai_athlete_seg.pt` a `models\powerai_athlete_seg.pt`. La app lo usa automaticamente para la silueta (`segmentation.py` lo prioriza si existe).
+   Genera `PowerNZ_athlete_v1_corrected.zip` con `frames/` + `masks/` (poligonos).
+3. Lo mas simple: como `kaggle_train_PowerNZ.py` entrena detector y segmentacion en una sola pasada si el dataset tiene `labels/` **y** `masks/`, lo ideal es juntar las mascaras con el dataset de barra (mismos frames). Cuando llegues a este punto, pasame el export y preparo el merge; el resto del circuito (Kaggle, validacion) es identico.
+4. Al integrar, copia `PowerNZ_athlete_seg.pt` a `models\PowerNZ_athlete_seg.pt`. La app lo usa automaticamente para la silueta (`segmentation.py` lo prioriza si existe).
 
 ## Flujo completo
 
@@ -92,7 +92,7 @@ frames\     imagenes para subir a Roboflow
 labels\     etiquetas YOLO exportadas/copiadas despues
 masks\      mascaras si entrenamos atleta mas adelante
 manifest.csv
-powerai_<exercise>_v1_frames.zip
+PowerNZ_<exercise>_v1_frames.zip
 ```
 
 Para sacar frames:
@@ -112,24 +112,24 @@ Cada carpeta de ejercicio es a la vez la fuente de videos y la salida (`--work-r
 Desde la raiz del repo:
 
    ```powershell
-   python training_cloud_kit\prepare_powerai_cloud_dataset.py --stage frames --overwrite
+   python training_cloud_kit\prepare_PowerNZ_cloud_dataset.py --stage frames --overwrite
    ```
 
 Esto crea:
 
-- `training_cloud_kit\work\deadlift_v1\powerai_deadlift_v1_frames.zip`
+- `training_cloud_kit\work\deadlift_v1\PowerNZ_deadlift_v1_frames.zip`
 - `training_cloud_kit\work\deadlift_v1\frames`
 - `training_cloud_kit\work\deadlift_v1\manifest.csv`
 
 ### 2. Subir a Kaggle
 
 1. En Kaggle, crea un dataset nuevo.
-2. Sube `powerai_deadlift_v1_frames.zip`.
+2. Sube `PowerNZ_deadlift_v1_frames.zip`.
 3. Crea un notebook nuevo.
 4. En Settings, activa GPU.
-5. En Add Data, anade el dataset que acabas de subir. Tiene que contener `powerai_deadlift_v1_frames.zip` o una carpeta con `frames/`.
-6. Sube tambien `training_cloud_kit\kaggle_train_powerai.py` o incluyelo en otro dataset de Kaggle. Este dataset del script no sustituye al dataset de frames.
-7. Abre `training_cloud_kit\kaggle_train_powerai.ipynb`.
+5. En Add Data, anade el dataset que acabas de subir. Tiene que contener `PowerNZ_deadlift_v1_frames.zip` o una carpeta con `frames/`.
+6. Sube tambien `training_cloud_kit\kaggle_train_PowerNZ.py` o incluyelo en otro dataset de Kaggle. Este dataset del script no sustituye al dataset de frames.
+7. Abre `training_cloud_kit\kaggle_train_PowerNZ.ipynb`.
 
 ### 3. Auto-etiquetar en Kaggle
 
@@ -151,8 +151,8 @@ Si dejas `DATASET_ZIP` y `DATASET_ROOT` vacios, el script buscara primero un `.z
 
 Ejecuta las celdas. Al terminar tendras dos salidas:
 
-- `/kaggle/working/powerai_cloud_training/powerai_autolabel_review.zip`
-- `/kaggle/working/powerai_deadlift_v1_corrected.zip`
+- `/kaggle/working/PowerNZ_cloud_training/PowerNZ_autolabel_review.zip`
+- `/kaggle/working/PowerNZ_deadlift_v1_corrected.zip`
 
 El primer ZIP trae:
 
@@ -163,9 +163,9 @@ El segundo ZIP ya viene limpiado automaticamente en Kaggle. Ese es el recomendad
 
 ### 4. Limpiar etiquetas automaticamente en local
 
-Este paso solo hace falta si quieres limpiar en tu PC. Si ya tienes `powerai_deadlift_v1_corrected.zip` desde Kaggle, saltalo.
+Este paso solo hace falta si quieres limpiar en tu PC. Si ya tienes `PowerNZ_deadlift_v1_corrected.zip` desde Kaggle, saltalo.
 
-Descarga `powerai_autolabel_review.zip` desde Kaggle y dejalo en Descargas. Luego ejecuta:
+Descarga `PowerNZ_autolabel_review.zip` desde Kaggle y dejalo en Descargas. Luego ejecuta:
 
 ```powershell
 python training_cloud_kit\auto_clean_autolabels.py --prepare-frames-if-missing
@@ -178,7 +178,7 @@ Esto hace automaticamente:
 - se queda con la mejor pareja `plate` + `bar_hub` por frame;
 - descarta cajas grandes, raras o sin pareja coherente;
 - crea previews limpias en `training_cloud_kit\work\deadlift_v1\review\auto_cleaned_previews`;
-- genera `training_cloud_kit\work\deadlift_v1\powerai_deadlift_v1_corrected.zip`.
+- genera `training_cloud_kit\work\deadlift_v1\PowerNZ_deadlift_v1_corrected.zip`.
 
 Ese ZIP corregido es el que debes volver a subir a Kaggle para entrenar.
 
@@ -195,13 +195,13 @@ Todo el etiquetado se hace en tu PC, nada se sube a internet (al contrario que R
 El script, la primera vez, crea el entorno virtual e instala Label Studio. Despues siempre:
 
 - arranca el servidor en `http://localhost:8080`;
-- crea (o reutiliza) un proyecto por ejercicio: `PowerAI - Peso muerto`, `PowerAI - Sentadilla`, `PowerAI - Press Banca`;
+- crea (o reutiliza) un proyecto por ejercicio: `PowerNZ - Peso muerto`, `PowerNZ - Sentadilla`, `PowerNZ - Press Banca`;
 - sincroniza de golpe todas las imagenes de cada carpeta `frames\`;
 - abre el navegador.
 
 Para parar el servidor: `Ctrl+C` en esa ventana. Los proyectos y lo etiquetado quedan guardados para la proxima vez.
 
-Usuario y contrasena por defecto (solo local): `juanda@powerai.local` / `powerai-local-2026`.
+Usuario y contrasena por defecto (solo local): `juanda@PowerNZ.local` / `PowerNZ-local-2026`.
 
 Si extraes mas frames despues, vuelve a ejecutar para re-sincronizar (no duplica nada):
 
@@ -250,16 +250,16 @@ Asi el indice 0 = plate y 1 = bar_hub, que es lo que esperan `dataset_bar.yaml` 
 Si hiciste correcciones manuales despues de la limpieza automatica:
 
 ```powershell
-python training_cloud_kit\prepare_powerai_cloud_dataset.py --stage package
+python training_cloud_kit\prepare_PowerNZ_cloud_dataset.py --stage package
 ```
 
 Esto crea:
 
-- `training_cloud_kit\work\deadlift_v1\powerai_deadlift_v1_corrected.zip`
+- `training_cloud_kit\work\deadlift_v1\PowerNZ_deadlift_v1_corrected.zip`
 
 ### 6. Entrenar en Kaggle
 
-Sube `powerai_deadlift_v1_corrected.zip` a Kaggle como nuevo dataset o nueva version del dataset anterior. Si usaste `MODE = 'autolabel-clean'`, descarga ese ZIP directamente desde Kaggle y vuelve a subirlo como dataset de entrenamiento.
+Sube `PowerNZ_deadlift_v1_corrected.zip` a Kaggle como nuevo dataset o nueva version del dataset anterior. Si usaste `MODE = 'autolabel-clean'`, descarga ese ZIP directamente desde Kaggle y vuelve a subirlo como dataset de entrenamiento.
 
 En el notebook, cambia:
 
@@ -277,20 +277,20 @@ cmd += ['--detector-batch', '4']
 
 Al terminar descarga:
 
-- `/kaggle/working/powerai_trained_models_v1.zip`
+- `/kaggle/working/PowerNZ_trained_models_v1.zip`
 
 ### 7. Validar modelos descargados
 
 Sin instalar nada en la app, valida el ZIP:
 
    ```powershell
-   python training_cloud_kit\validate_downloaded_models.py --models-zip path\to\powerai_trained_models_v1.zip
+   python training_cloud_kit\validate_downloaded_models.py --models-zip path\to\PowerNZ_trained_models_v1.zip
    ```
 
 Si pasa, entonces ya podemos integrar manualmente:
 
-- `powerai_bar_detector.pt` a `models\powerai_bar_detector.pt`
-- `powerai_athlete_seg.pt` a `models\powerai_athlete_seg.pt`, solo si existe
+- `PowerNZ_bar_detector.pt` a `models\PowerNZ_bar_detector.pt`
+- `PowerNZ_athlete_seg.pt` a `models\PowerNZ_athlete_seg.pt`, solo si existe
 
 ## Reglas para evitar falsos positivos
 
@@ -314,8 +314,8 @@ training_cloud_kit/
       dataset_bar.yaml
       dataset_athlete.yaml
       manifest.csv
-      powerai_deadlift_v1_frames.zip
-      powerai_deadlift_v1_corrected.zip
+      PowerNZ_deadlift_v1_frames.zip
+      PowerNZ_deadlift_v1_corrected.zip
 ```
 
 ## Notas de Kaggle
@@ -325,12 +325,12 @@ Kaggle es la via principal porque el entrenamiento necesita GPU. Colab queda com
 Comandos utiles dentro de Kaggle, si prefieres no usar el notebook:
 
 ```bash
-python kaggle_train_powerai.py --mode autolabel
-python kaggle_train_powerai.py --mode train
+python kaggle_train_PowerNZ.py --mode autolabel
+python kaggle_train_PowerNZ.py --mode train
 ```
 
 El ZIP final siempre se genera en:
 
 ```text
-/kaggle/working/powerai_trained_models_v1.zip
+/kaggle/working/PowerNZ_trained_models_v1.zip
 ```

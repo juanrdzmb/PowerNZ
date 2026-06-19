@@ -59,19 +59,19 @@ class CleanStats:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Import and automatically clean Kaggle YOLO-World labels for PowerAI."
+        description="Import and automatically clean Kaggle YOLO-World labels for PowerNZ."
     )
     parser.add_argument(
         "--review-zip",
         type=Path,
         default=None,
-        help="powerai_autolabel_review.zip. Defaults to the newest matching ZIP in Downloads.",
+        help="PowerNZ_autolabel_review.zip. Defaults to the newest matching ZIP in Downloads.",
     )
     parser.add_argument(
         "--work-root",
         type=Path,
         default=Path(__file__).resolve().parent / "work" / "deadlift_v1",
-        help="PowerAI cloud kit work folder.",
+        help="PowerNZ cloud kit work folder.",
     )
     parser.add_argument(
         "--videos-dir",
@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prepare-frames-if-missing",
         action="store_true",
-        help="Regenerate frames with prepare_powerai_cloud_dataset.py if work frames are missing.",
+        help="Regenerate frames with prepare_PowerNZ_cloud_dataset.py if work frames are missing.",
     )
     parser.add_argument(
         "--max-previews",
@@ -162,7 +162,7 @@ def main() -> None:
     )
     package_dataset(kit_root=kit_root, work_root=work_root)
 
-    final_zip = work_root / "powerai_deadlift_v1_corrected.zip"
+    final_zip = work_root / "PowerNZ_deadlift_v1_corrected.zip"
     final_stats = CleanStats(
         frames=stats.frames,
         labels_in=stats.labels_in,
@@ -184,11 +184,11 @@ def find_latest_review_zip() -> Path:
     for directory in (Path.home() / "Downloads", Path.cwd()):
         if directory.exists():
             candidates.extend(directory.glob("*autolabel*review*.zip"))
-            candidates.extend(directory.glob("powerai_autolabel_review*.zip"))
+            candidates.extend(directory.glob("PowerNZ_autolabel_review*.zip"))
     candidates = sorted(set(candidates), key=lambda path: path.stat().st_mtime, reverse=True)
     if not candidates:
         raise FileNotFoundError(
-            "No powerai_autolabel_review.zip found. Download it from Kaggle or pass --review-zip."
+            "No PowerNZ_autolabel_review.zip found. Download it from Kaggle or pass --review-zip."
         )
     return candidates[0]
 
@@ -207,14 +207,14 @@ def ensure_frames(
     if not prepare_if_missing:
         raise RuntimeError(
             f"No frames found in {frames_dir}. "
-            "Run prepare_powerai_cloud_dataset.py --stage frames first, "
+            "Run prepare_PowerNZ_cloud_dataset.py --stage frames first, "
             "or rerun this script with --prepare-frames-if-missing."
         )
 
     subprocess.run(
         [
             sys.executable,
-            str(kit_root / "prepare_powerai_cloud_dataset.py"),
+            str(kit_root / "prepare_PowerNZ_cloud_dataset.py"),
             "--stage",
             "frames",
             "--videos-dir",
@@ -408,7 +408,7 @@ def package_dataset(*, kit_root: Path, work_root: Path) -> None:
     subprocess.run(
         [
             sys.executable,
-            str(kit_root / "prepare_powerai_cloud_dataset.py"),
+            str(kit_root / "prepare_PowerNZ_cloud_dataset.py"),
             "--stage",
             "package",
             "--work-root",

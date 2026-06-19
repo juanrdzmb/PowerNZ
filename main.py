@@ -36,7 +36,7 @@ from io_video import (
     process_video_two_pass,
     read_video_metadata,
 )
-from load_estimation import LoadEstimate, estimate_load_from_detections
+from load_estimation import LoadEstimate
 from metrics import (
     EXERCISE_DISPLACEMENT_DEFAULTS,
     BiomechanicsConfig,
@@ -56,6 +56,7 @@ from video_export import convert_to_mobile_mp4, make_mobile_compatible_in_place
 
 logger = logging.getLogger("powerai")
 DEFAULT_BAR_OBJECT_MODEL = Path(__file__).with_name("models") / "powerai_bar_detector.pt"
+BarPathPoint = tuple[float, float] | None
 
 
 @dataclass
@@ -71,7 +72,7 @@ class FrameRecord:
     bar_anchor: BarAnchorState | None
     load_estimate: LoadEstimate | None
     anchor_velocities: list[AnchorVelocity] = field(default_factory=list)
-    bar_path: list[tuple[float, float]] = field(default_factory=list)
+    bar_path: list[BarPathPoint] = field(default_factory=list)
     history_len: int = 0
 
 
@@ -206,14 +207,49 @@ def _nearest_plate_detection_to_anchor(
 
 
 def _bar_path_horizontal_drift_cm(
-    bar_path: list[tuple[float, float]],
+    bar_path: list[BarPathPoint],
     meters_per_pixel: float,
 ) -> float | None:
-    if len(bar_path) < 2:
+    visible_points = [point for point in bar_path if point is not None]
+    if len(visible_points) < 2:
         return None
 
-    xs = [point[0] for point in bar_path]
+    xs = [point[0] for point in visible_points]
     return (max(xs) - min(xs)) * meters_per_pixel * 100.0
+
+
+def _manual_load_estimate(load_kg: float | None) -> LoadEstimate | None:
+    if load_kg is None:
+        return None
+    side_weight = max(0.0, (float(load_kg) - 20.0) / 2.0)
+    return LoadEstimate(
+        total_kg=float(load_kg),
+        side_weight_kg=side_weight,
+        colors=("manual",),
+        confidence=1.0,
+    )
+
+
+def _strict_ipf_gate(value: bool | None, strict: bool) -> bool:
+    if value is None:
+        return not strict
+    return value
+
+
+def _compute_ipf_flags_with_pose_fallback(
+    exercise: str,
+    pose: PoseResult | None,
+    fallback_pose: PoseResult | None,
+) -> tuple[bool | None, bool | None]:
+    depth_ok, lockout_ok = compute_ipf_flags(exercise, pose)
+    if depth_ok is not None and lockout_ok is not None:
+        return depth_ok, lockout_ok
+
+    fallback_depth, fallback_lockout = compute_ipf_flags(exercise, fallback_pose)
+    return (
+        depth_ok if depth_ok is not None else fallback_depth,
+        lockout_ok if lockout_ok is not None else fallback_lockout,
+    )
 
 
 def _warp_mask_with_optical_flow(
@@ -298,7 +334,7 @@ def _reject_outlier_observations(observations: list[float]) -> list[float]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Analizador de video PowerAI v1.")
+    parser = argparse.ArgumentParser(description="Analizador de video PowerNZ v1.")
     parser.add_argument("--input", required=True, type=Path, help="Path to the input video.")
     parser.add_argument("--output", required=True, type=Path, help="Path to save the analyzed video.")
     parser.add_argument(
@@ -503,6 +539,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Percent velocity loss from the best rep that triggers a report warning.",
     )
     parser.add_argument(
+        "--load-kg",
+        default=None,
+        type=float,
+        help="Peso total manual de la barra en kg. Si no se indica, no se muestra carga.",
+    )
+    parser.add_argument(
+        "--strict-ipf-validation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Require pose evidence for IPF depth/lockout when that rule applies. "
+            "Default: true; use --no-strict-ipf-validation only for debugging bar-only clips."
+        ),
+    )
+    parser.add_argument(
         "--min-rep-displacement-m",
         default=None,
         type=float,
@@ -578,7 +629,7 @@ def _bar_height_hint_from_pose(pose: PoseResult | None) -> Point2D | None:
 
 
 def _reset_visible_motion_history(
-    bar_path: list[tuple[float, float]],
+    bar_path: list[BarPathPoint],
     anchor_velocity_history: dict[str, list[float]],
     velocity_frame_history: list[int],
 ) -> None:
@@ -634,8 +685,8 @@ def _filter_detections_near_bar(
     wrist_span = (max(wrist_xs) - min(wrist_xs)) if len(wrist_xs) > 1 else 0.0
 
     height, width = frame_shape[:2]
-    y_margin = height * 0.16
-    x_margin = max(width * 0.32, wrist_span * 1.1 + width * 0.10)
+    y_margin = max(48.0, min(height * 0.13, 170.0))
+    x_margin = max(width * 0.24, wrist_span * 1.05 + width * 0.08)
     wrist_band_plates = []
     for detection in detections:
         if detection.label != "plate":
@@ -649,7 +700,7 @@ def _filter_detections_near_bar(
         for plate in wrist_band_plates:
             plate_x, plate_y = plate.center
             plate_size = max(plate.width, plate.height)
-            if abs(center_x - plate_x) <= plate_size * 0.90 and abs(center_y - plate_y) <= plate_size * 0.55:
+            if abs(center_x - plate_x) <= plate_size * 0.85 and abs(center_y - plate_y) <= plate_size * 0.48:
                 return True
         return False
 
@@ -756,6 +807,8 @@ def _should_refresh_athlete_lock(
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.load_kg is not None and args.load_kg <= 0:
+        raise SystemExit("--load-kg debe ser mayor que 0.")
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -932,7 +985,8 @@ def main() -> None:
         fps=input_metadata.fps,
         velocity_loss_threshold_percent=args.velocity_loss_threshold,
     )
-    bar_path: list[tuple[float, float]] = []
+    manual_load_estimate = _manual_load_estimate(args.load_kg)
+    bar_path: list[BarPathPoint] = []
     anchor_velocity_history: dict[str, list[float]] = {
         label: []
         for label, _ in ANCHOR_GROUPS
@@ -1025,7 +1079,7 @@ def main() -> None:
         wrist_point = _bar_height_hint_from_pose(pose)
         bar_anchor_tracker.set_pose_hint(wrist_point)
         bar_anchor = bar_anchor_tracker.update(frame, detections)
-        load_estimate = estimate_load_from_detections(detections, frame, bar_anchor.point)
+        load_estimate = manual_load_estimate
         raw_point = measurement_gate.point_for_measurement(bar_anchor)
         sample_point = raw_point
         previous_anchor = tracking_state["last_anchor_point"]
@@ -1038,10 +1092,12 @@ def main() -> None:
             max_anchor_jump = max(90.0, calibration_diameter_px * 0.32)
             if jump > max_anchor_jump:
                 # Reset the velocity filter and skip this sample on a teleport, but
-                # keep the existing trajectory (the renderer breaks the segment).
+                # keep the existing trajectory with an explicit break.
                 tracker = PointTracker(frequency_hz=input_metadata.fps, min_cutoff=1.4, beta=0.12)
                 tracking_state["last_anchor_point"] = raw_point
                 sample_point = None
+                if bar_path and bar_path[-1] is not None:
+                    bar_path.append(None)
         if raw_point is not None:
             tracking_state["last_anchor_point"] = raw_point
 
@@ -1057,17 +1113,21 @@ def main() -> None:
         tracking_source = bar_anchor.source
         if sample_point is not None and tracked.filtered is not None and tracked.is_valid:
             vertical_position_m = -tracked.filtered.y * calibration.meters_per_pixel
-            # IPF gating from pose angles; None means "pose can't tell" -> fall back to the
-            # bar heuristic (pass True so the FSM applies no extra constraint this frame).
-            depth_ok_raw, lockout_ok_raw = compute_ipf_flags(args.exercise, pose)
+            # IPF gating from pose angles. In v1 strict mode, "pose can't tell" means
+            # no valid IPF evidence; bar-only fallback remains available only for debug.
+            depth_ok_raw, lockout_ok_raw = _compute_ipf_flags_with_pose_fallback(
+                args.exercise,
+                pose,
+                raw_pose,
+            )
             sample = engine.update(
                 frame_index,
                 vertical_position_m,
                 hub_confidence=hub_confidence,
                 plate_confidence=plate_confidence,
                 tracking_source=tracking_source,
-                depth_ok=True if depth_ok_raw is None else depth_ok_raw,
-                lockout_ok=True if lockout_ok_raw is None else lockout_ok_raw,
+                depth_ok=_strict_ipf_gate(depth_ok_raw, args.strict_ipf_validation),
+                lockout_ok=_strict_ipf_gate(lockout_ok_raw, args.strict_ipf_validation),
             )
             tracking_state["last_rep_index"] = sample.rep_index
             tracking_state["last_state"] = sample.state
@@ -1083,10 +1143,16 @@ def main() -> None:
             anchor_velocities = anchor_tracker.update(pose)
             path_point = measurement_gate.point_for_measurement(bar_anchor)
             if path_point is not None:
-                last_pt = bar_path[-1] if bar_path else None
+                last_pt = next((point for point in reversed(bar_path) if point is not None), None)
                 max_horizontal = max(30.0, calibration_diameter_px * 0.18)
                 if last_pt is None or abs(path_point.x - last_pt[0]) <= max_horizontal:
                     bar_path.append((path_point.x, path_point.y))
+                else:
+                    if bar_path and bar_path[-1] is not None:
+                        bar_path.append(None)
+                    bar_path.append((path_point.x, path_point.y))
+            elif bar_path and bar_path[-1] is not None:
+                bar_path.append(None)
             _append_visible_motion_history(
                 anchor_velocity_history,
                 velocity_frame_history,
@@ -1094,6 +1160,8 @@ def main() -> None:
                 sample,
                 frame_index,
             )
+        elif bar_path and bar_path[-1] is not None:
+            bar_path.append(None)
 
         stats["frames"] += 1
         has_plate_anchor = bar_anchor.rect is not None and bar_anchor.source != "lost"
@@ -1220,7 +1288,7 @@ def main() -> None:
         except Exception as exc:
             mobile_conversion_warning = f"Could not convert output to mobile-compatible MP4: {exc}"
 
-    print("Analisis PowerAI completado.")
+    print("Analisis PowerNZ completado.")
     print(f"Input resolution: {metadata.width}x{metadata.height}")
     print(f"Input FPS: {metadata.fps:.2f} ({fps_source})")
     print(f"Frames processed: {stats['frames']}")

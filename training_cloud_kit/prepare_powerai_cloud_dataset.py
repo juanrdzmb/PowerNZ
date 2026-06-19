@@ -45,7 +45,7 @@ class DatasetStats:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Prepare an isolated PowerAI dataset package for Kaggle training."
+        description="Prepare an isolated PowerNZ dataset package for Kaggle training."
     )
     parser.add_argument(
         "--stage",
@@ -183,7 +183,7 @@ def prepare_frame_package(
     )
     _write_manifest(work_root / "manifest.csv", frames)
     _write_dataset_files(work_root=work_root, exercise=exercise, frames=len(frames), videos=videos)
-    zip_path = work_root / f"powerai_{exercise}_v1_frames.zip"
+    zip_path = work_root / f"PowerNZ_{exercise}_v1_frames.zip"
     _zip_dataset(
         root=work_root,
         zip_path=zip_path,
@@ -212,7 +212,7 @@ def package_corrected_dataset(
         raise RuntimeError(f"No frames found in {work_root / 'frames'}. Run --stage frames first.")
 
     _write_dataset_files(work_root=work_root, exercise=exercise, frames=frame_count, videos=[])
-    zip_path = work_root / f"powerai_{exercise}_v1_corrected.zip"
+    zip_path = work_root / f"PowerNZ_{exercise}_v1_corrected.zip"
     _zip_dataset(
         root=work_root,
         zip_path=zip_path,
@@ -375,7 +375,7 @@ def _write_dataset_files(*, work_root: Path, exercise: str, frames: int, videos:
         encoding="utf-8",
     )
     manifest = {
-        "dataset": f"powerai_{exercise}_v1",
+        "dataset": f"PowerNZ_{exercise}_v1",
         "exercise": exercise,
         "frames": frames,
         "source_videos": [str(path) for path in videos],
@@ -394,7 +394,7 @@ def _write_dataset_files(*, work_root: Path, exercise: str, frames: int, videos:
     (work_root / "README_DATASET.md").write_text(
         "\n".join(
             [
-                f"# PowerAI {exercise} v1 dataset",
+                f"# PowerNZ {exercise} v1 dataset",
                 "",
                 "Classes for detector:",
                 "",

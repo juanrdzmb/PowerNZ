@@ -1,10 +1,10 @@
-# Como Funciona PowerAI
+# Como Funciona PowerNZ
 
-Esta es mi explicacion tecnica de PowerAI, escrita para poder volver al proyecto dentro de unas semanas y entender rapidamente por que cada pieza existe.
+Esta es mi explicacion tecnica de PowerNZ, escrita para poder volver al proyecto dentro de unas semanas y entender rapidamente por que cada pieza existe.
 
 ## Idea Central
 
-PowerAI convierte un video de levantamiento en datos utiles:
+PowerNZ convierte un video de levantamiento en datos utiles:
 
 - donde esta el atleta;
 - donde esta el plato visible;
@@ -13,7 +13,7 @@ PowerAI convierte un video de levantamiento en datos utiles:
 - a que velocidad se mueve;
 - cuando empieza y termina una repeticion valida.
 
-La app no intenta decidir como un juez humano completo. Usa una aproximacion 2D: barra + landmarks + reglas logicas inspiradas en IPF. Si el video no permite ver un angulo fiable, prefiero caer al criterio de barra antes que inventar una decision falsa.
+La app no intenta decidir como un juez humano completo. Usa una aproximacion 2D: barra + landmarks + reglas logicas inspiradas en IPF. Si el video no permite ver un angulo fiable, prefiero no marcar la repeticion como valida antes que inventar una decision falsa.
 
 ## Pipeline
 
@@ -27,7 +27,7 @@ El flujo actual es de dos pasadas.
 6. El tracker de barra estabiliza el plato visible y exige `bar_hub` fiable para medir.
 7. Convierto pixeles a metros usando el diametro del disco olimpico: `0.45 m`.
 8. Calculo posicion vertical, velocidad, ROM, drift horizontal y fases del levantamiento.
-9. La maquina de estados cuenta reps segun ejercicio.
+9. La maquina de estados cuenta solo reps validadas segun ejercicio.
 10. En la segunda pasada dibujo el overlay con escala de grafico estable y total de reps ya conocido.
 
 ## Modelos
@@ -56,7 +56,7 @@ El punto metrico es `bar_hub`, no la muneca ni el centro aproximado del plato.
 
 El plato se puede dibujar aunque el hub no sea medible. Eso ayuda a revisar si el detector esta viendo bien el disco. Pero velocidad, trayectoria y contador solo avanzan cuando el hub pasa la compuerta de medicion.
 
-La trayectoria se pinta fina y casi vertical. Si hay un salto horizontal grande, el renderer corta el segmento para que no aparezca una linea falsa cruzando el video.
+La trayectoria se pinta fina y casi vertical. Si hay perdida de `bar_hub`, salto horizontal grande o cambio de lado, guardo un corte explicito y el renderer no une esos puntos.
 
 ## Conteo De Repeticiones
 
@@ -69,7 +69,8 @@ Para aceptar un bloqueo no basta con que la velocidad sea casi cero. Tambien exi
 
 - rango suficiente;
 - fase concentrica suficientemente madura;
-- `lockout_ok` si la pose puede decidir.
+- `lockout_ok` con evidencia de pose cuando la regla lo necesita;
+- que no haya bajada de la barra antes del bloqueo.
 
 Esto evita contar pausas tempranas como reps.
 
@@ -78,10 +79,12 @@ Esto evita contar pausas tempranas como reps.
 Los criterios que puedo estimar con video 2D son:
 
 - Sentadilla: rodilla/cadera para profundidad y bloqueo.
-- Peso muerto: rodilla/cadera extendidas al final.
-- Press banca: recorrido minimo de barra y codos bloqueados arriba.
+- Peso muerto: rodilla/cadera extendidas al final y sin bajada antes de terminar.
+- Press banca: codo al nivel de hombro en la bajada, recorrido minimo de barra y codos bloqueados arriba.
 
 No intento resolver señales, contacto con pecho, pies, gluteos, desplazamientos laterales o apoyo indebido como lo haria un arbitro real. Lo documento asi para no vender precision que el video 2D no puede garantizar.
+
+Por defecto uso validacion estricta: si un landmark clave no se ve, esa parte de la regla queda como no confiable y la rep no se acepta automaticamente. Para depurar clips dificiles puedo usar `--no-strict-ipf-validation`, pero no es el flujo normal de v1.
 
 ## Overlay
 
@@ -126,3 +129,13 @@ Para depurar puedo usar:
 - `metrics.py`: velocidad y maquinas de estado.
 - `biomech_angles.py`: angulos para compuertas IPF.
 - `render_overlay.py`: HUD final.
+
+## Carga Manual
+
+Quite la estimacion normal por color porque no era fiable. La app no sabe cuantos kilos hay en la barra solo mirando discos si no tiene un modelo entrenado para pesos por disco. Ahora `CARGA` se oculta por defecto y solo aparece si yo paso un valor manual:
+
+```powershell
+--load-kg 180
+```
+
+Para estimar peso automaticamente en el futuro necesitare otro dataset/modelo de discos por peso o una entrada guiada por el usuario.

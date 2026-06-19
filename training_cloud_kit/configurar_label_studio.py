@@ -1,4 +1,4 @@
-"""Configura Label Studio para etiquetar PowerAI sin tocar la interfaz.
+"""Configura Label Studio para etiquetar PowerNZ sin tocar la interfaz.
 
 Crea (o reutiliza) un proyecto por ejercicio, le engancha el almacenamiento
 local de su carpeta `frames\\` y sincroniza todas las imagenes de una vez.
@@ -35,9 +35,9 @@ LABEL_CONFIG = """
 
 # (titulo del proyecto, nombre de la carpeta del ejercicio)
 EXERCISES = [
-    ("PowerAI - Peso muerto", "Peso muerto"),
-    ("PowerAI - Sentadilla", "Sentadilla"),
-    ("PowerAI - Press Banca", "Press Banca"),
+    ("PowerNZ - Peso muerto", "Peso muerto"),
+    ("PowerNZ - Sentadilla", "Sentadilla"),
+    ("PowerNZ - Press Banca", "Press Banca"),
 ]
 
 IMAGE_REGEX = r".*\.(jpe?g|png)$"
@@ -46,8 +46,8 @@ IMAGE_REGEX = r".*\.(jpe?g|png)$"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.environ.get("LS_BASE_URL", "http://localhost:8080"))
-    parser.add_argument("--email", default=os.environ.get("LABEL_STUDIO_USERNAME", "juanda@powerai.local"))
-    parser.add_argument("--password", default=os.environ.get("LABEL_STUDIO_PASSWORD", "powerai-local-2026"))
+    parser.add_argument("--email", default=os.environ.get("LABEL_STUDIO_USERNAME", "juanda@PowerNZ.local"))
+    parser.add_argument("--password", default=os.environ.get("LABEL_STUDIO_PASSWORD", "PowerNZ-local-2026"))
     parser.add_argument(
         "--entrenamiento-dir",
         type=Path,

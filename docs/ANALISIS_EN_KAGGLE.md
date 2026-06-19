@@ -28,12 +28,6 @@ cloud/PowerNZ_Kaggle_Simple.ipynb
 
 Ese es el recomendado porque tiene una sola celda y evita errores de orden.
 
-Tambien existe la version por pasos:
-
-```text
-cloud/PowerNZ_Kaggle_Analisis.ipynb
-```
-
 8. Cambio esta linea:
 
 ```python

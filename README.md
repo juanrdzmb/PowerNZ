@@ -1,6 +1,6 @@
-# PowerAI
+# PowerNZ
 
-PowerAI es mi herramienta para analizar videos de powerlifting con vision por computador. La estoy preparando como una primera version estable: detecto el atleta, la barra y los discos, cuento repeticiones logicas para peso muerto, sentadilla y press banca, y exporto un video vertical 9:16 listo para revisar o compartir.
+PowerNZ es mi herramienta para analizar videos de powerlifting con vision por computador. La estoy preparando como una primera version estable: detecto el atleta, la barra y los discos, cuento repeticiones logicas para peso muerto, sentadilla y press banca, y exporto un video vertical 9:16 listo para revisar o compartir.
 
 El objetivo de esta v1 no es llenar la pantalla de lineas. Quiero que el video diga lo importante: donde esta el plato, donde esta el hub de la barra, como se mueve la barra, que velocidad lleva y si la repeticion cumple una lectura tecnica razonable basada en reglas IPF.
 
@@ -12,9 +12,10 @@ El objetivo de esta v1 no es llenar la pantalla de lineas. Quiero que el video d
 - Refina los landmarks con la mascara del atleta para evitar puntos saltando al fondo.
 - Calcula velocidad de barra, ROM, drift horizontal, fases del levantamiento y repeticiones.
 - Valida repeticiones con una aproximacion 2D a criterios IPF:
-  - peso muerto: extension de rodilla/cadera al bloqueo;
+  - peso muerto: subida completa, sin bajada antes del bloqueo, rodilla/cadera extendidas;
   - sentadilla: profundidad por debajo de paralela y bloqueo arriba;
-  - press banca: recorrido suficiente y codos bloqueados arriba.
+  - press banca: bajada real, subida completa y codos bloqueados arriba.
+- No inventa la carga por color. Si quiero mostrar peso exacto, lo paso manualmente con `--load-kg`.
 - Exporta por defecto en `720x1280` (`portrait-720`) sin recortar el video original.
 - Genera reportes JSON/CSV si se piden.
 
@@ -69,7 +70,6 @@ Si mi PC va lenta, uso Kaggle con GPU gratis. Deje un notebook preparado aqui:
 
 ```text
 cloud/PowerNZ_Kaggle_Simple.ipynb
-cloud/PowerNZ_Kaggle_Analisis.ipynb
 ```
 
 La guia paso a paso esta en:
@@ -104,6 +104,11 @@ python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Press Banca\Pres
 ```
 
 Por defecto el resultado sale en `720x1280` con fondo discreto si el video original no es vertical. No recorto al atleta ni la barra.
+Si quiero mostrar el peso real en el overlay, lo pongo yo:
+
+```powershell
+python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise deadlift --pose-backend yolo --plate-diameter-px 120 --load-kg 180
+```
 
 ## Opciones Importantes
 
@@ -118,6 +123,9 @@ Por defecto el resultado sale en `720x1280` con fondo discreto si el video origi
 - `--velocity-chart bar`: default; grafico inferior solo de barra.
 - `--velocity-chart multi`: muestra barra + landmarks en el grafico para depurar.
 - `--body-velocity-display compact`: muestra velocidades corporales como indicadores pequeños.
+- `--load-kg 180`: muestra una carga manual exacta. Sin este flag no muestro `CARGA`.
+- `--strict-ipf-validation`: default; si la pose no permite comprobar bloqueo/profundidad, no valido automaticamente.
+- `--no-strict-ipf-validation`: modo de depuracion para clips donde quiero probar conteo solo con barra.
 - `--report-json outputs\report.json`: guarda resumen tecnico.
 - `--report-csv outputs\reps.csv`: guarda datos por repeticion.
 - `--validation-run-label nombre --save-validation-screenshots`: guarda video, reportes y capturas de revision.

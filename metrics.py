@@ -168,6 +168,8 @@ class LiftStateMachine:
         self._lockout_hold_count = 0
         self._rest_hold_count = 0
         self._bottom_position_m: float | None = None
+        self._downward_before_lockout = False
+        self._downward_before_lockout_frames = 0
         self.completed_reps: list[CompletedRep] = []
 
     @property
@@ -218,6 +220,8 @@ class LiftStateMachine:
         self._max_displacement_m = 0.0
         self._lockout_hold_count = 0
         self._rest_hold_count = 0
+        self._downward_before_lockout = False
+        self._downward_before_lockout_frames = 0
 
     def _update_inicio(self, smoothed_velocity_mps: float) -> None:
         if smoothed_velocity_mps > self._config.upward_velocity_threshold_mps:
@@ -233,6 +237,15 @@ class LiftStateMachine:
         self._peak_velocity_mps = max(self._peak_velocity_mps, smoothed_velocity_mps)
         displacement = self._current_displacement(position_m)
         self._max_displacement_m = max(self._max_displacement_m, displacement)
+        descent_tolerance_m = max(0.04, self._config.min_rep_displacement_m * 0.16)
+        downward_loss_m = self._max_displacement_m - displacement
+        if self._lockout_frame is None and smoothed_velocity_mps < self._config.downward_velocity_threshold_mps:
+            if downward_loss_m >= descent_tolerance_m:
+                self._downward_before_lockout_frames += 1
+            if self._downward_before_lockout_frames >= 2:
+                self._downward_before_lockout = True
+        elif downward_loss_m < descent_tolerance_m * 0.5:
+            self._downward_before_lockout_frames = 0
 
         near_still = abs(smoothed_velocity_mps) <= self._config.lockout_velocity_threshold_mps
         enough_range = displacement >= self._config.min_rep_displacement_m
@@ -244,7 +257,7 @@ class LiftStateMachine:
 
         # IPF lockout plus a mature pull: only treat the top as valid when the joints
         # are extended and the velocity dip is not just an early false pause.
-        if near_still and enough_range and mature_pull and lockout_ok:
+        if near_still and enough_range and mature_pull and lockout_ok and not self._downward_before_lockout:
             self._lockout_hold_count += 1
         else:
             self._lockout_hold_count = 0
@@ -320,6 +333,8 @@ class LiftStateMachine:
 
         if self._lockout_frame is None:
             return False
+        if self._downward_before_lockout:
+            return False
 
         rep_frames = frame_index - self._active_start_frame
         if rep_frames < self._config.min_rep_frames:
@@ -336,6 +351,8 @@ class LiftStateMachine:
         self._max_displacement_m = 0.0
         self._lockout_hold_count = 0
         self._rest_hold_count = 0
+        self._downward_before_lockout = False
+        self._downward_before_lockout_frames = 0
 
     def _current_displacement(self, position_m: float) -> float:
         if self._active_start_position_m is None:
@@ -373,6 +390,8 @@ class EccentricFirstStateMachine:
         self._max_displacement_m = 0.0
         self._lockout_hold_count = 0
         self._depth_reached = False  # parallel reached during the current descent
+        self._downward_during_ascent = False
+        self._downward_during_ascent_frames = 0
         self.completed_reps: list[CompletedRep] = []
 
     @property
@@ -411,6 +430,8 @@ class EccentricFirstStateMachine:
         self._bottom_position_m = position_m
         self._lockout_hold_count = 0
         self._depth_reached = False
+        self._downward_during_ascent = False
+        self._downward_during_ascent_frames = 0
 
     def _update_bajada(
         self,
@@ -444,6 +465,8 @@ class EccentricFirstStateMachine:
         self._peak_velocity_mps = smoothed_velocity_mps
         self._max_displacement_m = 0.0
         self._lockout_hold_count = 0
+        self._downward_during_ascent = False
+        self._downward_during_ascent_frames = 0
 
     def _update_tiron(
         self,
@@ -455,6 +478,15 @@ class EccentricFirstStateMachine:
         self._peak_velocity_mps = max(self._peak_velocity_mps, smoothed_velocity_mps)
         displacement = self._current_displacement(position_m)
         self._max_displacement_m = max(self._max_displacement_m, displacement)
+        descent_tolerance_m = max(0.035, self._config.min_rep_displacement_m * 0.16)
+        downward_loss_m = self._max_displacement_m - displacement
+        if self._lockout_frame is None and smoothed_velocity_mps < self._config.downward_velocity_threshold_mps:
+            if downward_loss_m >= descent_tolerance_m:
+                self._downward_during_ascent_frames += 1
+            if self._downward_during_ascent_frames >= 2:
+                self._downward_during_ascent = True
+        elif downward_loss_m < descent_tolerance_m * 0.5:
+            self._downward_during_ascent_frames = 0
 
         near_still = abs(smoothed_velocity_mps) <= self._config.lockout_velocity_threshold_mps
         enough_range = displacement >= self._config.min_rep_displacement_m
@@ -463,7 +495,7 @@ class EccentricFirstStateMachine:
 
         # IPF lockout at the top plus a mature ascent: squat standing erect / bench arms
         # extended, without counting a brief early stall as lockout.
-        if near_still and enough_range and mature_pull and lockout_ok:
+        if near_still and enough_range and mature_pull and lockout_ok and not self._downward_during_ascent:
             self._lockout_hold_count += 1
         else:
             self._lockout_hold_count = 0
@@ -516,6 +548,8 @@ class EccentricFirstStateMachine:
             return False
         if self._lockout_frame is None:
             return False
+        if self._downward_during_ascent:
+            return False
         if frame_index - self._active_start_frame < self._config.min_rep_frames:
             return False
         return self._max_displacement_m >= self._config.min_rep_displacement_m
@@ -527,6 +561,8 @@ class EccentricFirstStateMachine:
         self._peak_velocity_mps = 0.0
         self._max_displacement_m = 0.0
         self._lockout_hold_count = 0
+        self._downward_during_ascent = False
+        self._downward_during_ascent_frames = 0
 
     def _current_displacement(self, position_m: float) -> float:
         if self._active_start_position_m is None:

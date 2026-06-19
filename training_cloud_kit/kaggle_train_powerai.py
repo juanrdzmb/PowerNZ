@@ -71,7 +71,7 @@ class CleanedDataset:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run PowerAI auto-labeling and training inside Kaggle."
+        description="Run PowerNZ auto-labeling and training inside Kaggle."
     )
     parser.add_argument(
         "--mode",
@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--work-dir",
         type=Path,
-        default=Path("/kaggle/working/powerai_cloud_training"),
+        default=Path("/kaggle/working/PowerNZ_cloud_training"),
         help="Kaggle working directory.",
     )
     parser.add_argument(
@@ -166,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cleaned-output-zip",
         type=Path,
-        default=Path("/kaggle/working/powerai_deadlift_v1_corrected.zip"),
+        default=Path("/kaggle/working/PowerNZ_deadlift_v1_corrected.zip"),
         help="Corrected dataset ZIP written by clean/autolabel-clean modes.",
     )
     parser.add_argument(
@@ -259,7 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-zip",
         type=Path,
-        default=Path("/kaggle/working/powerai_trained_models_v1.zip"),
+        default=Path("/kaggle/working/PowerNZ_trained_models_v1.zip"),
         help="Final model ZIP path.",
     )
     return parser
@@ -320,7 +320,7 @@ def find_input_dataset_source() -> Path:
     if not dataset_roots:
         raise FileNotFoundError(
             "No ZIP file or folder with frames/ was found under /kaggle/input. "
-            "Add the PowerAI frames dataset, usually powerai_deadlift_v1_frames.zip, "
+            "Add the PowerNZ frames dataset, usually PowerNZ_deadlift_v1_frames.zip, "
             "then attach that dataset to this notebook with Add Data."
         )
 
@@ -490,7 +490,7 @@ def run_autolabel(*, args: argparse.Namespace, dataset_root: Path) -> AutolabelS
     (review_dir / "README_AUTOLABEL.md").write_text(
         "\n".join(
             [
-                "# PowerAI auto-label review",
+                "# PowerNZ auto-label review",
                 "",
                 "Copy the labels folder back into training_cloud_kit/work/deadlift_v1/labels.",
                 "Review previews before training. Delete or fix labels that point to floor/background plates.",
@@ -500,7 +500,7 @@ def run_autolabel(*, args: argparse.Namespace, dataset_root: Path) -> AutolabelS
         encoding="utf-8",
     )
 
-    review_zip = args.work_dir / "powerai_autolabel_review.zip"
+    review_zip = args.work_dir / "PowerNZ_autolabel_review.zip"
     zip_autolabel_review(
         zip_path=review_zip,
         labels_dir=labels_dir,
@@ -735,7 +735,7 @@ def train_detector(
         batch=args.detector_batch,
         device=args.device,
         project=str(runs_dir / "detect"),
-        name="powerai_bar_detector",
+        name="PowerNZ_bar_detector",
         exist_ok=True,
         augment=True,
         mosaic=1.0,
@@ -748,11 +748,11 @@ def train_detector(
         scale=0.5,
         fliplr=0.5,
     )
-    best = runs_dir / "detect" / "powerai_bar_detector" / "weights" / "best.pt"
+    best = runs_dir / "detect" / "PowerNZ_bar_detector" / "weights" / "best.pt"
     if not best.exists():
         print(f"Detector finished, but best.pt was not found at {best}")
         return None
-    output = models_dir / "powerai_bar_detector.pt"
+    output = models_dir / "PowerNZ_bar_detector.pt"
     shutil.copy2(best, output)
     print(f"Detector model saved: {output}")
     return output
@@ -774,7 +774,7 @@ def train_athlete_seg(
         batch=args.athlete_batch,
         device=args.device,
         project=str(runs_dir / "segment"),
-        name="powerai_athlete_seg",
+        name="PowerNZ_athlete_seg",
         exist_ok=True,
         augment=True,
         mosaic=1.0,
@@ -787,11 +787,11 @@ def train_athlete_seg(
         scale=0.5,
         fliplr=0.5,
     )
-    best = runs_dir / "segment" / "powerai_athlete_seg" / "weights" / "best.pt"
+    best = runs_dir / "segment" / "PowerNZ_athlete_seg" / "weights" / "best.pt"
     if not best.exists():
         print(f"Athlete segmentation finished, but best.pt was not found at {best}")
         return None
-    output = models_dir / "powerai_athlete_seg.pt"
+    output = models_dir / "PowerNZ_athlete_seg.pt"
     shutil.copy2(best, output)
     print(f"Athlete segmentation model saved: {output}")
     return output
@@ -931,7 +931,7 @@ def write_kaggle_dataset_metadata(cleaned_dir: Path, *, dataset_root: Path) -> N
         encoding="utf-8",
     )
     manifest = {
-        "dataset": "powerai_deadlift_v1_cleaned",
+        "dataset": "PowerNZ_deadlift_v1_cleaned",
         "source_dataset_root": str(dataset_root),
         "bar_classes": {"0": "plate", "1": "bar_hub"},
         "athlete_classes": {"0": "athlete", "1": "background_person"},
@@ -948,7 +948,7 @@ def write_kaggle_dataset_metadata(cleaned_dir: Path, *, dataset_root: Path) -> N
     (cleaned_dir / "README_DATASET.md").write_text(
         "\n".join(
             [
-                "# PowerAI deadlift v1 cleaned dataset",
+                "# PowerNZ deadlift v1 cleaned dataset",
                 "",
                 "This dataset was auto-labeled and auto-cleaned in Kaggle.",
                 "",
