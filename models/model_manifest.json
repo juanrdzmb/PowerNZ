@@ -22,8 +22,8 @@
       "path": "models/pose_landmarker_lite.task",
       "url": "https://huggingface.co/dzmbo/PowerNZ-Models/resolve/main/pose_landmarker_lite.task",
       "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a",
-      "required": false,
-      "description": "Modelo opcional para usar --pose-backend mediapipe."
+      "required": true,
+      "description": "Modelo MediaPipe para la fusión automática de pose y silueta."
     }
   ]
 }

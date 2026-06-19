@@ -8,7 +8,7 @@ El objetivo de esta v1 no es llenar la pantalla de lineas. Quiero que el video d
 
 - Usa `models/powerai_bar_detector.pt` para detectar `plate` y `bar_hub`.
 - Usa `models/powerai_athlete_seg.pt` para segmentar la silueta del atleta.
-- Usa YOLO Pose o MediaPipe para obtener landmarks corporales.
+- Usa fusión automática: YOLO fija al atleta y MediaPipe mejora landmarks y máscara cuando coincide.
 - Refina los landmarks con la mascara del atleta para evitar puntos saltando al fondo.
 - Calcula velocidad de barra, ROM, drift horizontal, fases del levantamiento y repeticiones.
 - Valida repeticiones con una aproximacion 2D a criterios IPF:
@@ -96,30 +96,33 @@ runpod/train_runpod.sh
 Peso muerto:
 
 ```powershell
-python main.py --input video_prueba.mp4 --output outputs\deadlift.mp4 --exercise deadlift --pose-backend yolo --plate-diameter-px 120
+python main.py --input video_prueba.mp4 --output outputs\deadlift.mp4 --exercise deadlift --profile balanced
 ```
 
 Sentadilla:
 
 ```powershell
-python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Sentadilla\Sentadilla  (2).mp4" --output outputs\squat.mp4 --exercise squat --pose-backend yolo --plate-diameter-px 120
+python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Sentadilla\Sentadilla  (2).mp4" --output outputs\squat.mp4 --exercise squat --profile balanced
 ```
 
 Press banca:
 
 ```powershell
-python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Press Banca\PressBanca (4).mp4" --output outputs\bench.mp4 --exercise bench --pose-backend yolo --plate-diameter-px 120
+python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Press Banca\PressBanca (4).mp4" --output outputs\bench.mp4 --exercise bench --profile balanced
 ```
 
 Por defecto el resultado sale en `720x1280` con fondo discreto si el video original no es vertical. No recorto al atleta ni la barra.
 Si quiero mostrar el peso real en el overlay, lo pongo yo:
 
 ```powershell
-python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise deadlift --pose-backend yolo --plate-diameter-px 120 --load-kg 180
+python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise deadlift --load-kg 180
 ```
 
 ## Opciones Importantes
 
+- `--profile balanced|precision|fast`: equilibrado es el valor por defecto y conserva el overlay 720p.
+- `--pose-backend auto|mediapipe|yolo`: `auto` combina la identidad de YOLO con MediaPipe.
+- `--calibration-mode auto|manual`: automática por defecto; en manual usa `--plate-diameter-px`.
 - `--exercise deadlift|squat|bench`: cambia la maquina de estados y las reglas tecnicas.
 - `--output-format portrait-720`: default; exporta 9:16 `720x1280` sin recortar.
 - `--output-format source`: mantiene la geometria original, util para depurar.
@@ -135,16 +138,16 @@ python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise
 - `--strict-ipf-validation`: default; si la pose no permite comprobar bloqueo/profundidad, no valido automaticamente.
 - `--no-strict-ipf-validation`: modo de depuracion para clips donde quiero probar conteo solo con barra.
 - `--report-json outputs\report.json`: guarda resumen tecnico.
-- `--report-csv outputs\reps.csv`: guarda datos por repeticion.
+- `--report-csv outputs\reps.csv`: guarda candidatas con estado `accepted`, `review` o `rejected`.
 - `--validation-run-label nombre --save-validation-screenshots`: guarda video, reportes y capturas de revision.
 
 ## Flujo Interno
 
 Proceso el video en dos pasadas.
 
-1. En la primera pasada analizo: pose, mascara, barra, tracking, velocidad y repeticiones.
-2. Cuando termina esa pasada ya conozco el total de reps, la curva completa y la escala estable del grafico.
-3. En la segunda pasada dibujo el overlay final con contador `hecho/total`, trayectoria y tabla.
+1. En la primera pasada analizo pose, máscara y barra; la máscara se guarda temporalmente y no se vuelve a inferir.
+2. Reconstruyo una sola trayectoria de `bar_hub`, rechazo saltos y calculo velocidad centrada sin latencia; después decido las reps y revisiones técnicas.
+3. En la segunda pasada dibujo el overlay final con contador `hecho/total`, trayectoria, máscara cacheada y gráfica sincronizada.
 
 El punto metrico de la barra es `bar_hub`. Si veo el plato pero no veo un hub fiable, dibujo la caja del plato para que se entienda el seguimiento, pero no invento velocidad ni trayectoria desde la pose.
 
@@ -159,7 +162,7 @@ Antes de considerar una version lista reviso tres cosas:
 Comando recomendado de smoke:
 
 ```powershell
-python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Peso muerto\Peso Muerto (1).mp4" --output outputs\v1_deadlift.mp4 --exercise deadlift --pose-backend yolo --plate-diameter-px 120 --validation-run-label v1_deadlift --save-validation-screenshots
+python main.py --input "C:\Users\Juanda\Documents\Entrenamiento\Peso muerto\Peso Muerto (1).mp4" --output outputs\v1_deadlift.mp4 --exercise deadlift --validation-run-label v1_deadlift --save-validation-screenshots
 ```
 
 ## Tests

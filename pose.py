@@ -12,8 +12,9 @@ import numpy as np
 from io_video import Frame
 
 
-PoseBackendName = Literal["mediapipe", "yolo"]
+PoseBackendName = Literal["mediapipe", "yolo", "auto"]
 DEFAULT_YOLO_POSE_MODEL = Path(__file__).with_name("yolov8n-pose.pt")
+DEFAULT_MEDIAPIPE_POSE_MODEL = Path(__file__).with_name("models") / "pose_landmarker_lite.task"
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,9 @@ class PoseResult:
     backend: PoseBackendName
     detected: bool
     segmentation_mask: np.ndarray | None = None
+    source: str = ""
+    confidence: float = 0.0
+    person_box: tuple[float, float, float, float] | None = None
 
 
 class PoseEstimator(Protocol):
@@ -112,6 +116,9 @@ def refine_pose_with_mask(
         backend=pose.backend,
         detected=pose.detected,
         segmentation_mask=pose.segmentation_mask,
+        source=pose.source,
+        confidence=pose.confidence,
+        person_box=pose.person_box,
     )
 
 
@@ -239,6 +246,8 @@ class MediaPipePoseEstimator:
             backend="mediapipe",
             detected=True,
             segmentation_mask=segmentation_mask,
+            source="mediapipe-legacy",
+            confidence=_pose_confidence(keypoints),
         )
 
     def _estimate_with_tasks(self, frame: Frame) -> PoseResult:
@@ -270,6 +279,8 @@ class MediaPipePoseEstimator:
             backend="mediapipe",
             detected=True,
             segmentation_mask=_mediapipe_tasks_segmentation_mask(result),
+            source="mediapipe-tasks",
+            confidence=_pose_confidence(keypoints),
         )
 
     def close(self) -> None:
@@ -348,10 +359,122 @@ class YoloPoseEstimator:
         self._last_center = _person_center(results[0], person_index)
         self._last_person_box = _person_box(results[0], person_index)
 
-        return PoseResult(keypoints=keypoints, backend="yolo", detected=True)
+        person_box = _person_box(results[0], person_index)
+        return PoseResult(
+            keypoints=keypoints,
+            backend="yolo",
+            detected=True,
+            source="yolo",
+            confidence=_pose_confidence(keypoints),
+            person_box=person_box,
+        )
 
     def close(self) -> None:
         return None
+
+
+class HybridPoseEstimator:
+    """Use YOLO to preserve athlete identity and MediaPipe for denser pose/masks.
+
+    MediaPipe is deliberately accepted only when enough of its landmarks land in
+    the YOLO-selected athlete box.  This prevents a nearby spectator from taking
+    over the silhouette in multi-person clips while retaining MediaPipe's 33
+    landmarks and segmentation when it agrees with the locked athlete.
+    """
+
+    def __init__(
+        self,
+        yolo_model_path: str | Path = DEFAULT_YOLO_POSE_MODEL,
+        mediapipe_model_path: str | Path | None = None,
+        fps: float = 30.0,
+    ) -> None:
+        self._yolo = YoloPoseEstimator(model_path=yolo_model_path)
+        self._mediapipe: MediaPipePoseEstimator | None = None
+        model_path = mediapipe_model_path or DEFAULT_MEDIAPIPE_POSE_MODEL
+        try:
+            self._mediapipe = MediaPipePoseEstimator(model_path=model_path, fps=fps)
+        except Exception as exc:  # A robust auto mode must still work without the optional task model.
+            logging.getLogger(__name__).warning("MediaPipe unavailable; auto pose falls back to YOLO: %s", exc)
+
+    def set_preferred_bar_center(self, center: tuple[float, float] | None) -> None:
+        self._yolo.set_preferred_bar_center(center)
+
+    def lock_to_person(self, box: tuple[float, float, float, float] | None) -> None:
+        self._yolo.lock_to_person(box)
+
+    def get_person_box(self) -> tuple[float, float, float, float] | None:
+        return self._yolo.get_person_box()
+
+    def estimate(self, frame: Frame) -> PoseResult:
+        yolo_pose = self._yolo.estimate(frame)
+        if self._mediapipe is None:
+            return yolo_pose
+
+        try:
+            mediapipe_pose = self._mediapipe.estimate(frame)
+        except Exception as exc:  # Do not make a long export fail for one MediaPipe frame.
+            logging.getLogger(__name__).warning("MediaPipe frame failed; keeping YOLO pose: %s", exc)
+            return yolo_pose
+
+        return fuse_pose_results(yolo_pose, mediapipe_pose)
+
+    def close(self) -> None:
+        self._yolo.close()
+        if self._mediapipe is not None:
+            self._mediapipe.close()
+
+
+def fuse_pose_results(yolo_pose: PoseResult, mediapipe_pose: PoseResult) -> PoseResult:
+    """Return the safest fused pose without mixing athletes between detectors."""
+    if not yolo_pose.detected:
+        return mediapipe_pose
+    if not mediapipe_pose.detected:
+        return yolo_pose
+
+    person_box = yolo_pose.person_box
+    if person_box is not None and not _pose_matches_person_box(mediapipe_pose, person_box):
+        return yolo_pose
+
+    by_name = {keypoint.name: keypoint for keypoint in yolo_pose.keypoints}
+    for keypoint in mediapipe_pose.keypoints:
+        previous = by_name.get(keypoint.name)
+        if previous is None or keypoint.visibility >= previous.visibility * 0.88:
+            by_name[keypoint.name] = keypoint
+
+    keypoints = list(by_name.values())
+    return PoseResult(
+        keypoints=keypoints,
+        backend="auto",
+        detected=True,
+        segmentation_mask=mediapipe_pose.segmentation_mask,
+        source="hybrid",
+        confidence=max(yolo_pose.confidence, mediapipe_pose.confidence),
+        person_box=person_box,
+    )
+
+
+def _pose_matches_person_box(
+    pose: PoseResult,
+    person_box: tuple[float, float, float, float],
+) -> bool:
+    x1, y1, x2, y2 = person_box
+    width = max(1.0, x2 - x1)
+    height = max(1.0, y2 - y1)
+    pad_x = width * 0.18
+    pad_y = height * 0.18
+    visible = [keypoint for keypoint in pose.keypoints if keypoint.visibility >= 0.35]
+    if len(visible) < 5:
+        return False
+    inside = sum(
+        x1 - pad_x <= keypoint.x <= x2 + pad_x and y1 - pad_y <= keypoint.y <= y2 + pad_y
+        for keypoint in visible
+    )
+    return inside / len(visible) >= 0.70
+
+
+def _pose_confidence(keypoints: list[PoseKeypoint]) -> float:
+    visible = [keypoint.visibility for keypoint in keypoints if keypoint.visibility > 0]
+    return float(sum(visible) / len(visible)) if visible else 0.0
 
 
 def _largest_pose_person_index(result: object) -> int:
@@ -587,10 +710,17 @@ def _mediapipe_tasks_segmentation_mask(result: object) -> np.ndarray | None:
 
 
 def create_pose_estimator(
-    backend: PoseBackendName = "mediapipe",
+    backend: PoseBackendName = "auto",
     model_path: str | Path | None = None,
     fps: float = 30.0,
 ) -> PoseEstimator:
+    if backend == "auto":
+        return HybridPoseEstimator(
+            yolo_model_path=DEFAULT_YOLO_POSE_MODEL,
+            mediapipe_model_path=model_path,
+            fps=fps,
+        )
+
     if backend == "mediapipe":
         return MediaPipePoseEstimator(model_path=model_path, fps=fps)
 

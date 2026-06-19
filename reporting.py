@@ -27,6 +27,8 @@ class RepReport:
     hub_confidence_mean: float = 0.0
     plate_confidence_mean: float = 0.0
     tracking_source_pct: dict[str, float] | None = None
+    validation_status: str = "accepted"
+    validation_reason: str = "accepted"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,8 @@ class AnalysisReport:
     completed_reps: int
     reps: list[RepReport]
     hub_reliable_frames_pct: float = 0.0
+    reviewed_reps: int = 0
+    rejected_reps: int = 0
 
 
 class RepReportBuilder:
@@ -52,7 +56,12 @@ class RepReportBuilder:
     def add_sample(self, sample: KinematicSample) -> None:
         self._samples.append(sample)
 
-    def build_rep_report(self, rep: CompletedRep) -> RepReport:
+    def build_rep_report(
+        self,
+        rep: CompletedRep,
+        validation_status: str = "accepted",
+        validation_reason: str = "accepted",
+    ) -> RepReport:
         for existing in self._built_reports:
             if existing.rep_index == rep.rep_index:
                 return existing
@@ -114,6 +123,8 @@ class RepReportBuilder:
             hub_confidence_mean=self._compute_confidence_mean(rep_samples, "hub"),
             plate_confidence_mean=self._compute_confidence_mean(rep_samples, "plate"),
             tracking_source_pct=self._compute_source_pct(rep_samples),
+            validation_status=validation_status,
+            validation_reason=validation_reason,
         )
         self._built_reports.append(report)
 
@@ -178,6 +189,8 @@ def write_csv_report(reps: list[RepReport], output_path: str | Path) -> None:
         "hub_confidence_mean",
         "plate_confidence_mean",
         "tracking_source_pct",
+        "validation_status",
+        "validation_reason",
     ]
 
     with path.open("w", encoding="utf-8", newline="") as file:
