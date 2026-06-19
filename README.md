@@ -85,6 +85,14 @@ cloud/PowerNZ_Colab_Analisis.ipynb
 docs/ANALISIS_EN_COLAB.md
 ```
 
+Para entrenar modelos mas rapido alquilando GPU por horas, deje el flujo de RunPod aqui:
+
+```text
+runpod/README_RUNPOD.md
+runpod/setup_runpod.sh
+runpod/train_runpod.sh
+```
+
 Peso muerto:
 
 ```powershell
