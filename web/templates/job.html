@@ -9,7 +9,10 @@
 </section>
 
 <section class="status-card {% if job.is_terminal %}terminal{% endif %}" data-status-card>
-  <div class="progress-orbit" style="--progress: {{ job.progress }}"><span data-progress>{{ job.progress }}%</span></div>
+  <div class="progress-cluster">
+    <div class="progress-orbit"><span data-progress>{{ job.progress }}%</span></div>
+    <progress class="progress-line" data-progress-bar value="{{ job.progress }}" max="100"></progress>
+  </div>
   <div class="status-info">
     <span class="status-kicker" data-status-label>{% if job.status == 'completed' %}COMPLETADO{% elif job.status == 'failed' %}NECESITA OTRO INTENTO{% else %}EN PROCESO{% endif %}</span>
     <h2 data-stage-heading>{{ job.stage }}</h2>

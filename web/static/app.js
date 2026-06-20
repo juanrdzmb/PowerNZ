@@ -29,6 +29,7 @@
   if (statusRoot.getAttribute('data-terminal') === 'true') return;
   const statusUrl = statusRoot.getAttribute('data-status-url');
   const progress = document.querySelector('[data-progress]');
+  const progressBar = document.querySelector('[data-progress-bar]');
   const stage = document.querySelector('[data-stage]');
   const stageHeading = document.querySelector('[data-stage-heading]');
   const detail = document.querySelector('[data-status-detail]');
@@ -43,7 +44,7 @@
       if (!response.ok) return;
       const data = await response.json();
       if (progress) progress.textContent = `${data.progress}%`;
-      if (statusCard) statusCard.style.setProperty('--progress', data.progress);
+      if (progressBar) progressBar.value = data.progress;
       if (stage) stage.textContent = data.stage;
       if (stageHeading) stageHeading.textContent = data.stage;
       if (data.terminal) {
