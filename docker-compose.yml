@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      POWERNZ_WEB_DATA_DIR: /data
+      POWERNZ_WEB_HOST: 0.0.0.0
+      POWERNZ_SECURE_COOKIES: "1"
+      POWERNZ_MAX_UPLOAD_BYTES: "262144000"
+      POWERNZ_MAX_DURATION_SECONDS: "60"
+      POWERNZ_WEB_PROFILE: balanced
+    volumes:
+      - powernz_jobs:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      POWERNZ_HOSTNAME: ${POWERNZ_HOSTNAME:?Set POWERNZ_HOSTNAME in .env first}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  powernz_jobs:
+  caddy_data:
+  caddy_config:

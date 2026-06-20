@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}PowerNZ · Sube tu levantamiento{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">VÍDEO · BARRA · TÉCNICA</p>
+    <h1>Entrena con datos.<br><em>Mueve con intención.</em></h1>
+    <p class="hero-text">Sube un clip de tu levantamiento y PowerNZ dibujará la trayectoria de la barra, velocidad, repeticiones y lectura técnica.</p>
+    <div class="hero-notes">
+      <span><b>01</b> Un vídeo cada vez</span>
+      <span><b>24 H</b> Borrado automático</span>
+      <span><b>EU</b> Beta privada</span>
+    </div>
+  </div>
+  <aside class="hero-stat card-grid" aria-label="Qué analiza PowerNZ">
+    <div><span class="stat-label">SEGUIMIENTO</span><strong>Barra<br>y atleta</strong></div>
+    <div><span class="stat-label">SALIDA</span><strong>Vídeo<br>vertical 720p</strong></div>
+    <div><span class="stat-label">EJERCICIOS</span><strong>DL · SQ<br>BP</strong></div>
+  </aside>
+</section>
+
+<section class="upload-section" aria-labelledby="upload-title">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">NUEVO ANÁLISIS</p>
+      <h2 id="upload-title">Vamos a ver ese levantamiento.</h2>
+    </div>
+    <p>Clip corto, barra visible y cámara estable. Mejor de perfil o diagonal.</p>
+  </div>
+  <form class="analysis-form" action="/jobs" method="post" enctype="multipart/form-data">
+    <label class="drop-zone" for="video-input" data-drop-zone>
+      <input id="video-input" name="video" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" required>
+      <span class="drop-icon" aria-hidden="true">↗</span>
+      <span class="drop-title">Elige o arrastra tu vídeo</span>
+      <span class="drop-meta" data-file-meta>MP4 o MOV · hasta {{ max_upload_mb }} MB · máximo {{ max_duration_seconds }} s</span>
+    </label>
+
+    <fieldset class="form-block exercise-fieldset">
+      <legend>¿Qué levantamiento es?</legend>
+      <div class="exercise-options">
+        {% for value, label in exercises.items() %}
+        <label class="exercise-option">
+          <input type="radio" name="exercise" value="{{ value }}" {% if value == 'deadlift' %}checked{% endif %}>
+          <span class="exercise-index">0{{ loop.index }}</span>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <div class="form-row">
+      <label class="weight-input" for="load-kg">
+        <span>Peso total <small>Opcional</small></span>
+        <span class="input-wrap"><input id="load-kg" name="load_kg" inputmode="decimal" type="text" placeholder="Ej. 180"><b>kg</b></span>
+      </label>
+      <div class="privacy-copy">
+        <label class="consent"><input name="privacy_accepted" value="yes" type="checkbox" required><span></span>Entiendo que el vídeo se procesará para generar mi análisis y se eliminará en 24 horas.</label>
+        <p>No se usa para entrenar modelos ni se comparte con terceros. Sube solo vídeos propios o con permiso.</p>
+      </div>
+    </div>
+    <button class="primary-button" type="submit"><span>Analizar mi vídeo</span><b>→</b></button>
+  </form>
+</section>
+
+<section class="tips-strip" aria-label="Consejos de grabación">
+  <p><span>CONSEJO</span> Deja que se vea al menos un disco y la barra durante todo el levantamiento.</p>
+  <p><span>PRIVACIDAD</span> No necesitamos tu nombre, correo ni cuenta.</p>
+</section>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}PowerNZ · Tu análisis{% endblock %}
+{% block content %}
+<section class="job-hero" data-job-status data-status-url="/api/jobs/{{ job.id }}" data-terminal="{{ 'true' if job.is_terminal else 'false' }}">
+  <a class="back-link" href="/">← Nuevo análisis</a>
+  <p class="eyebrow">{{ exercise_label|upper }} · ANÁLISIS PRIVADO</p>
+  <h1>{% if job.status == 'completed' %}Tu levantamiento<br><em>ya está listo.</em>{% elif job.status == 'failed' %}Ese clip se nos<br><em>ha resistido.</em>{% else %}Estamos leyendo<br><em>tu levantamiento.</em>{% endif %}</h1>
+  <p class="job-description" data-stage>{{ job.stage }}</p>
+</section>
+
+<section class="status-card {% if job.is_terminal %}terminal{% endif %}" data-status-card>
+  <div class="progress-orbit" style="--progress: {{ job.progress }}"><span data-progress>{{ job.progress }}%</span></div>
+  <div class="status-info">
+    <span class="status-kicker" data-status-label>{% if job.status == 'completed' %}COMPLETADO{% elif job.status == 'failed' %}NECESITA OTRO INTENTO{% else %}EN PROCESO{% endif %}</span>
+    <h2 data-stage-heading>{{ job.stage }}</h2>
+    <p data-status-detail>{% if job.status == 'completed' %}Tu vídeo final está preparado para descargar.{% elif job.status == 'failed' %}{{ job.error_message }}{% else %}No cierres esta página: puedes esperar aquí mientras trabajamos.{% endif %}</p>
+  </div>
+</section>
+
+{% if job.status == 'completed' %}
+<section class="result-panel">
+  <div>
+    <p class="eyebrow">RESULTADO</p>
+    <h2>Tu vídeo PowerNZ</h2>
+    <p>Incluye barra, trayectoria, velocidad, repeticiones y las observaciones técnicas detectadas.</p>
+  </div>
+  <a class="primary-button" href="/job/{{ job.id }}/download"><span>Descargar vídeo</span><b>↓</b></a>
+</section>
+{% elif job.status == 'failed' %}
+<section class="retry-panel">
+  <p>Prueba con un clip de menos de un minuto, buena luz y la barra siempre visible. Si vuelve a fallar, cuéntanos qué pasó.</p>
+</section>
+{% endif %}
+
+{% if job.is_terminal %}
+<section class="feedback-section">
+  <div class="feedback-intro">
+    <p class="eyebrow">AYÚDANOS A MEJORAR</p>
+    <h2>¿Ha visto algo raro?</h2>
+    <p>Solo guardaremos tu comentario y datos técnicos mínimos durante 30 días. El vídeo sigue eliminándose según lo previsto.</p>
+  </div>
+  {% if feedback_sent %}
+    <div class="thanks-message">Gracias. Tu observación ya está guardada.</div>
+  {% else %}
+    <form class="feedback-form" action="/job/{{ job.id }}/feedback" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <select name="category" required>
+        {% for value, label in feedback_categories.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+      <textarea name="comment" minlength="8" maxlength="1000" required placeholder="Ej.: contó 2 repeticiones y eran 3; el círculo siguió a un disco del suelo…"></textarea>
+      <button class="text-button" type="submit">Enviar observación →</button>
+    </form>
+  {% endif %}
+</section>
+<section class="deletion-section">
+  <div><strong>Este análisis se borrará el {{ expires_text }}.</strong><span>También puedes eliminar ahora el vídeo y el resultado.</span></div>
+  <form action="/job/{{ job.id }}/delete" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="delete-button" type="submit">Eliminar ahora</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
