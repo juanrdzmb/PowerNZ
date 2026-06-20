@@ -44,3 +44,21 @@ def test_upload_requires_explicit_privacy_consent(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 422
+
+
+def test_home_recovers_only_the_jobs_owned_by_this_browser(tmp_path: Path) -> None:
+    with _client(tmp_path) as owner:
+        created = owner.post(
+            "/jobs",
+            files={"video": ("levantamiento.mp4", b"small-video", "video/mp4")},
+            data={"exercise": "bench", "privacy_accepted": "yes"},
+            follow_redirects=False,
+        )
+        location = created.headers["location"]
+
+        recovered_home = owner.get("/")
+        assert "RECUPERAR ANÁLISIS" in recovered_home.text
+        assert location in recovered_home.text
+
+        with _client(tmp_path) as stranger:
+            assert "RECUPERAR ANÁLISIS" not in stranger.get("/").text

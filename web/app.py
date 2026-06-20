@@ -27,6 +27,7 @@ EXERCISES = {
     "bench": "Press banca",
 }
 COOKIE_PREFIX = "pnz_job_"
+JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 FEEDBACK_CATEGORIES = {
     "conteo": "El conteo de repeticiones no cuadra",
@@ -102,6 +103,13 @@ def create_app(config: WebConfig | None = None, *, start_worker: bool = True) ->
                 "exercises": EXERCISES,
                 "max_upload_mb": round(config.max_upload_bytes / 1024 / 1024),
                 "max_duration_seconds": int(config.max_duration_seconds),
+                "recent_jobs": _recent_owned_jobs(request, store),
+                "job_status_labels": {
+                    "queued": "En cola",
+                    "processing": "Procesando",
+                    "completed": "Listo para descargar",
+                    "failed": "Necesita otro intento",
+                },
             },
         )
 
@@ -257,6 +265,25 @@ def _authorized_job(request: Request, store: JobStore, job_id: str) -> tuple[Job
     if job is None:
         raise HTTPException(status_code=404, detail="No encontramos este análisis en este navegador.")
     return job, secret  # type: ignore[return-value]
+
+
+def _recent_owned_jobs(request: Request, store: JobStore) -> list[Job]:
+    """Recover jobs from the browser's private cookies after a tab was closed.
+
+    Each cookie includes an unguessable secret and is verified by the database;
+    an arbitrary job ID in a browser cookie can never expose another person's job.
+    """
+    jobs: list[Job] = []
+    for cookie_name, secret in request.cookies.items():
+        if not cookie_name.startswith(COOKIE_PREFIX):
+            continue
+        job_id = cookie_name.removeprefix(COOKIE_PREFIX)
+        if not JOB_ID_RE.fullmatch(job_id):
+            continue
+        job = store.get_authorized(job_id, secret)
+        if job is not None:
+            jobs.append(job)
+    return sorted(jobs, key=lambda job: job.created_at, reverse=True)[:3]
 
 
 def _require_csrf(secret: str, job_id: str, csrf_token: str) -> None:

@@ -19,6 +19,24 @@
   </aside>
 </section>
 
+{% if recent_jobs %}
+<section class="resume-section" aria-labelledby="resume-title">
+  <div>
+    <p class="eyebrow">RECUPERAR ANÁLISIS</p>
+    <h2 id="resume-title">Tienes un análisis guardado en este navegador.</h2>
+    <p>Si cerraste la pestaña, no pasa nada: el vídeo sigue procesándose en segundo plano.</p>
+  </div>
+  <div class="resume-jobs">
+    {% for job in recent_jobs %}
+    <a class="resume-job" href="/job/{{ job.id }}">
+      <span><b>{{ job_status_labels.get(job.status, job.status) }}</b><small>{{ job.stage }}</small></span>
+      <strong>{% if job.status == 'completed' %}Abrir descarga{% else %}{{ job.progress }} %{% endif %} →</strong>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section class="upload-section" aria-labelledby="upload-title">
   <div class="section-heading">
     <div>
