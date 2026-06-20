@@ -23,6 +23,9 @@ class WebConfig:
     submissions_per_hour: int = 2
     secure_cookies: bool = False
     analysis_profile: str = "balanced"
+    privacy_controller: str = "PowerNZ Beta"
+    privacy_contact: str = "la persona que te compartió este enlace"
+    privacy_notice_version: str = "2026-06-21"
 
     @property
     def database_path(self) -> Path:
@@ -42,4 +45,9 @@ class WebConfig:
             max_duration_seconds=float(os.environ.get("POWERNZ_MAX_DURATION_SECONDS", 60)),
             secure_cookies=os.environ.get("POWERNZ_SECURE_COOKIES", "0") == "1",
             analysis_profile=os.environ.get("POWERNZ_WEB_PROFILE", "balanced"),
+            privacy_controller=os.environ.get("POWERNZ_PRIVACY_CONTROLLER", "PowerNZ Beta"),
+            privacy_contact=os.environ.get(
+                "POWERNZ_PRIVACY_CONTACT", "la persona que te compartió este enlace"
+            ),
+            privacy_notice_version=os.environ.get("POWERNZ_PRIVACY_NOTICE_VERSION", "2026-06-21"),
         )

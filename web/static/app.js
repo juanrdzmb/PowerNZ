@@ -24,6 +24,15 @@
     showFile(file);
   });
 
+  const analysisForm = document.querySelector('.analysis-form');
+analysisForm?.addEventListener('submit', () => {
+  const submit = analysisForm.querySelector('button[type="submit"]');
+  if (!submit || !fileInput?.files?.length) return;
+  submit.disabled = true;
+  const label = submit.querySelector('span');
+  if (label) label.textContent = 'Subiendo tu vídeo…';
+});
+
   const statusRoot = document.querySelector('[data-job-status]');
   if (!statusRoot) return;
   if (statusRoot.getAttribute('data-terminal') === 'true') return;

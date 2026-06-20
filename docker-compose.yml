@@ -9,7 +9,9 @@ services:
       POWERNZ_SECURE_COOKIES: "1"
       POWERNZ_MAX_UPLOAD_BYTES: "262144000"
       POWERNZ_MAX_DURATION_SECONDS: "60"
-      POWERNZ_WEB_PROFILE: balanced
+      POWERNZ_WEB_PROFILE: fast
+      POWERNZ_PRIVACY_CONTROLLER: ${POWERNZ_PRIVACY_CONTROLLER:-PowerNZ Beta}
+      POWERNZ_PRIVACY_CONTACT: ${POWERNZ_PRIVACY_CONTACT:-la persona que te compartió este enlace}
     volumes:
       - powernz_jobs:/data
     expose:

@@ -32,6 +32,8 @@ class Job:
     created_at: int
     expires_at: int
     error_message: str | None
+    privacy_notice_version: str
+    privacy_accepted_at: int | None
 
     @property
     def is_terminal(self) -> bool:
@@ -66,7 +68,9 @@ class JobStore:
                     report_csv_path TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
                     expires_at INTEGER NOT NULL,
-                    error_message TEXT
+                    error_message TEXT,
+                    privacy_notice_version TEXT NOT NULL DEFAULT '2026-06-21',
+                    privacy_accepted_at INTEGER
                 );
 
                 CREATE INDEX IF NOT EXISTS jobs_queue_idx ON jobs(status, created_at);
@@ -84,6 +88,16 @@ class JobStore:
                 CREATE INDEX IF NOT EXISTS feedback_expiry_idx ON feedback(expires_at);
                 """
             )
+            existing_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "privacy_notice_version" not in existing_columns:
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN privacy_notice_version TEXT NOT NULL DEFAULT '2026-06-21'"
+                )
+            if "privacy_accepted_at" not in existing_columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN privacy_accepted_at INTEGER")
 
     def create_job(
         self,
@@ -93,6 +107,7 @@ class JobStore:
         source_filename: str,
         work_dir: Path,
         ttl_seconds: int,
+        privacy_notice_version: str,
     ) -> tuple[Job, str]:
         job_id = uuid.uuid4().hex
         secret = secrets.token_urlsafe(32)
@@ -120,6 +135,8 @@ class JobStore:
             "created_at": now,
             "expires_at": now + ttl_seconds,
             "error_message": None,
+            "privacy_notice_version": privacy_notice_version,
+            "privacy_accepted_at": now,
         }
         with self._connect() as connection:
             connection.execute(
@@ -127,11 +144,11 @@ class JobStore:
                 INSERT INTO jobs (
                     id, secret_digest, status, progress, stage, exercise, load_kg, source_filename,
                     work_dir, source_path, normalized_path, result_path, report_json_path, report_csv_path,
-                    created_at, expires_at, error_message
+                    created_at, expires_at, error_message, privacy_notice_version, privacy_accepted_at
                 ) VALUES (
                     :id, :secret_digest, :status, :progress, :stage, :exercise, :load_kg, :source_filename,
                     :work_dir, :source_path, :normalized_path, :result_path, :report_json_path, :report_csv_path,
-                    :created_at, :expires_at, :error_message
+                    :created_at, :expires_at, :error_message, :privacy_notice_version, :privacy_accepted_at
                 )
                 """,
                 values,
@@ -266,6 +283,8 @@ class JobStore:
             created_at=int(row["created_at"]),
             expires_at=int(row["expires_at"]),
             error_message=str(row["error_message"]) if row["error_message"] else None,
+            privacy_notice_version=str(row["privacy_notice_version"]),
+            privacy_accepted_at=int(row["privacy_accepted_at"]) if row["privacy_accepted_at"] is not None else None,
         )
 
 

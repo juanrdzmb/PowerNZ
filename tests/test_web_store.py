@@ -14,6 +14,7 @@ def _create_job(store: JobStore, tmp_path: Path):
         source_filename="video.mp4",
         work_dir=work_dir,
         ttl_seconds=3600,
+        privacy_notice_version="test-v1",
     )
 
 

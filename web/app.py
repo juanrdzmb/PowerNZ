@@ -104,6 +104,7 @@ def create_app(config: WebConfig | None = None, *, start_worker: bool = True) ->
                 "max_upload_mb": round(config.max_upload_bytes / 1024 / 1024),
                 "max_duration_seconds": int(config.max_duration_seconds),
                 "recent_jobs": _recent_owned_jobs(request, store),
+                "privacy": _privacy_context(config),
                 "job_status_labels": {
                     "queued": "En cola",
                     "processing": "Procesando",
@@ -146,6 +147,7 @@ def create_app(config: WebConfig | None = None, *, start_worker: bool = True) ->
                 source_filename=safe_name,
                 work_dir=work_dir,
                 ttl_seconds=config.job_ttl_seconds,
+                privacy_notice_version=config.privacy_notice_version,
             )
         except Exception:
             shutil.rmtree(work_dir, ignore_errors=True)
@@ -178,6 +180,7 @@ def create_app(config: WebConfig | None = None, *, start_worker: bool = True) ->
                 "csrf_token": make_csrf_token(secret, job.id),
                 "feedback_categories": FEEDBACK_CATEGORIES,
                 "feedback_sent": feedback == "ok",
+                "privacy": _privacy_context(config),
             },
         )
 
@@ -238,6 +241,14 @@ def create_app(config: WebConfig | None = None, *, start_worker: bool = True) ->
             ttl_seconds=config.feedback_ttl_seconds,
         )
         return RedirectResponse(url=f"/job/{job.id}?feedback=ok", status_code=303)
+
+    @app.get("/privacy")
+    async def privacy_notice(request: Request) -> Response:
+        return templates.TemplateResponse(
+            request,
+            "privacy.html",
+            {"privacy": _privacy_context(config)},
+        )
 
     @app.get("/healthz")
     async def healthz() -> JSONResponse:
@@ -336,6 +347,15 @@ def _job_public_data(job: Job) -> dict[str, object]:
 
 def _format_expiry(epoch_seconds: int) -> str:
     return datetime.fromtimestamp(epoch_seconds).astimezone().strftime("%d/%m/%Y a las %H:%M")
+
+
+def _privacy_context(config: WebConfig) -> dict[str, str]:
+    return {
+        "controller": config.privacy_controller,
+        "contact": config.privacy_contact,
+        "notice_version": config.privacy_notice_version,
+        "updated": "21 de junio de 2026",
+    }
 
 
 app = create_app()
