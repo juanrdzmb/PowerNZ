@@ -85,12 +85,16 @@ class JobWorker:
             raise ValueError("El archivo subido está vacío o no se pudo guardar.")
         if job.source_path.stat().st_size > self.config.max_upload_bytes:
             raise ValueError("El vídeo supera el límite de 250 MB de esta beta.")
-        self._validate_metadata(job.source_path)
+        # A short 4K clip is acceptable if it fits the upload limit: it is
+        # converted to our 1080p-compatible working format before analysis.
+        # Keeping the size/duration checks here still protects the small beta
+        # VM from huge uploads.
+        self._validate_metadata(job.source_path, enforce_dimensions=False)
 
     def _validate_normalized(self, job: Job) -> None:
         self._validate_metadata(job.normalized_path)
 
-    def _validate_metadata(self, video_path: Path) -> None:
+    def _validate_metadata(self, video_path: Path, *, enforce_dimensions: bool = True) -> None:
         try:
             metadata = read_video_metadata(video_path)
         except Exception as exc:  # noqa: BLE001
@@ -100,7 +104,9 @@ class JobWorker:
             raise ValueError("El archivo no parece contener un vídeo válido.")
         if duration > self.config.max_duration_seconds:
             raise ValueError("Esta beta acepta vídeos de hasta 60 segundos.")
-        if metadata.width > self.config.max_width or metadata.height > self.config.max_height:
+        if enforce_dimensions and (
+            metadata.width > self.config.max_width or metadata.height > self.config.max_height
+        ):
             raise ValueError("El vídeo supera 1080p. Expórtalo a 1080p o menos e inténtalo de nuevo.")
 
     def _ensure_models_are_ready(self) -> None:
