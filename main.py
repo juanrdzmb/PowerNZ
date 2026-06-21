@@ -75,6 +75,7 @@ class FrameRecord:
     sample: KinematicSample | None = None
     technique: TechniqueAssessment | None = None
     bar_anchor: BarAnchorState | None = None
+    visual_plate_anchor: BarAnchorState | None = None
     load_estimate: LoadEstimate | None = None
     measurement: BarMeasurement | None = None
     depth_ok: bool | None = None
@@ -817,6 +818,59 @@ def _filter_detections_near_bar(
             kept_bar += 1
 
     return kept if kept_bar > 0 else detections
+
+
+def _plate_detections_for_visual_anchor(
+    detections: list[Detection],
+    pose: PoseResult | None,
+    frame_shape: tuple[int, ...],
+) -> list[Detection]:
+    """Choose one real-looking outer plate for the visual rectangle.
+
+    Metric tracking is allowed to be wrist-centred because it looks for the hub.
+    A visible plate in a frontal lift is deliberately *not* near the wrists: it is
+    at the end of the bar. Keeping this selection separate stops a torso false
+    positive from stealing the plate box while body-proxy metrics are active.
+    """
+    plates = [detection for detection in detections if detection.label == "plate"]
+    if not plates:
+        return []
+
+    height, width = frame_shape[:2]
+    if pose is None or not pose.detected or not pose.keypoints:
+        return [max(plates, key=lambda detection: detection.confidence * max(detection.width, detection.height))]
+
+    points = [
+        (keypoint.x, keypoint.y)
+        for keypoint in pose.keypoints
+        if keypoint.visibility >= 0.40
+    ]
+    if len(points) < 3:
+        return [max(plates, key=lambda detection: detection.confidence * max(detection.width, detection.height))]
+
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    body_x1, body_x2 = min(xs), max(xs)
+    body_y1, body_y2 = min(ys), max(ys)
+    body_center_x = (body_x1 + body_x2) / 2.0
+    body_center_y = (body_y1 + body_y2) / 2.0
+    body_width = max(40.0, body_x2 - body_x1)
+    body_height = max(80.0, body_y2 - body_y1)
+
+    def score(detection: Detection) -> float:
+        center_x, center_y = detection.center
+        distance = float(np.hypot(center_x - body_center_x, center_y - body_center_y))
+        outside_body = (
+            center_x < body_x1 - body_width * 0.20
+            or center_x > body_x2 + body_width * 0.20
+            or center_y < body_y1 - body_height * 0.15
+            or center_y > body_y2 + body_height * 0.15
+        )
+        lateral = abs(center_x - body_center_x) / max(1.0, width)
+        size = min(1.0, max(detection.width, detection.height) / max(1.0, min(width, height) * 0.18))
+        return detection.confidence * (0.55 + 1.55 * float(outside_body) + lateral + size * 0.35 + distance / max(width, height))
+
+    return [max(plates, key=score)]
 
 
 def _resolve_object_model_path(
@@ -1593,6 +1647,7 @@ def main() -> None:
         use_grabcut=args.use_grabcut,
     )
     bar_anchor_tracker = BarAnchorTracker(fps=input_metadata.fps)
+    visual_plate_tracker = BarAnchorTracker(fps=input_metadata.fps)
     measurement_gate = BarMeasurementGate(
         requires_hub=args.measurement_requires_hub,
         hub_confidence_threshold=args.hub_confidence_threshold,
@@ -1694,8 +1749,12 @@ def main() -> None:
                 small_detections = []
             if not small_detections and fallback_object_detector is not None:
                 small_detections = fallback_object_detector.detect(inference_frame)
-            detections = inference_transform.detections_to_output(small_detections)
-            detections = _filter_detections_near_bar(detections, pose, frame.shape)
+            raw_detections = inference_transform.detections_to_output(small_detections)
+            visual_plate_anchor = visual_plate_tracker.update(
+                frame,
+                _plate_detections_for_visual_anchor(raw_detections, pose, frame.shape),
+            )
+            detections = _filter_detections_near_bar(raw_detections, pose, frame.shape)
             bar_anchor_tracker.set_pose_hint(_bar_height_hint_from_pose(pose))
             bar_anchor = bar_anchor_tracker.update(frame, detections)
             raw_point = measurement_gate.point_for_measurement(bar_anchor) if metric_enabled else None
@@ -1726,6 +1785,7 @@ def main() -> None:
                 raw_pose=raw_pose,
                 detections=detections,
                 bar_anchor=bar_anchor if (args.show_unmeasured_anchor or bar_anchor.measurable) else None,
+                visual_plate_anchor=visual_plate_anchor,
                 load_estimate=manual_load_estimate,
                 measurement=measurement,
                 depth_ok=depth_ok,
@@ -1907,7 +1967,11 @@ def main() -> None:
                 video_fps=input_metadata.fps,
                 anchor_velocities=record.anchor_velocities,
                 rep_reports=analysis["accepted_reports"],  # type: ignore[arg-type]
-                bar_anchor=record.bar_anchor,
+                bar_anchor=(
+                    record.visual_plate_anchor
+                    if record.metric_source == "body_proxy"
+                    else record.bar_anchor
+                ),
                 subject_mask=mask_cache.get(frame_index),
                 load_estimate=record.load_estimate,
                 bar_drift_cm=(

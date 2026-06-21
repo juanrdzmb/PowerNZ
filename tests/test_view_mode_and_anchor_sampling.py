@@ -16,6 +16,7 @@ from main import (
     _filter_detections_near_bar,
     _manual_load_estimate,
     _plate_heuristic_enabled,
+    _plate_detections_for_visual_anchor,
     _reset_visible_motion_history,
     _sample_point_from_single_anchor,
     _strict_ipf_gate,
@@ -250,3 +251,28 @@ def test_body_proxy_uses_wrist_midpoint_when_hub_is_occluded() -> None:
     point, confidence = proxy
     assert point == Point2D(260.0, 650.0)
     assert confidence == pytest.approx(0.84 * 0.76)
+
+
+def test_visual_plate_anchor_prefers_outer_disc_over_torso_false_positive() -> None:
+    pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_shoulder", 310.0, 420.0, 0.9),
+            PoseKeypoint("right_shoulder", 410.0, 420.0, 0.9),
+            PoseKeypoint("left_hip", 320.0, 650.0, 0.9),
+            PoseKeypoint("right_hip", 400.0, 650.0, 0.9),
+            PoseKeypoint("left_ankle", 320.0, 960.0, 0.9),
+            PoseKeypoint("right_ankle", 400.0, 960.0, 0.9),
+        ],
+        backend="mediapipe",
+        detected=True,
+    )
+    torso_false_positive = Detection("plate", 0.98, 320.0, 560.0, 405.0, 690.0)
+    outer_disc = Detection("plate", 0.86, 12.0, 570.0, 145.0, 745.0)
+
+    chosen = _plate_detections_for_visual_anchor(
+        [torso_false_positive, outer_disc],
+        pose,
+        (1280, 720, 3),
+    )
+
+    assert chosen == [outer_disc]
