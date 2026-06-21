@@ -36,3 +36,22 @@ def test_transform_round_trips_pose_and_mask_to_output_canvas() -> None:
     assert output.keypoints[0].y == 400.0
     assert output.segmentation_mask is not None
     assert output.segmentation_mask.shape == (1280, 720)
+
+
+def test_transform_accepts_mediapipe_single_channel_mask() -> None:
+    geometry = resolve_output_geometry(
+        VideoMetadata(width=720, height=1280, fps=30.0, frame_count=10, codec="mp4v"),
+        output_mode="portrait-720",
+    )
+    transform = InferenceTransform.from_output_geometry(geometry, inference_max_side=640)
+    single_channel_mask = np.full(
+        (transform.inference_height, transform.inference_width, 1),
+        255,
+        dtype=np.uint8,
+    )
+
+    output = transform.mask_to_output(single_channel_mask)
+
+    assert output is not None
+    assert output.shape == (1280, 720)
+    assert output.dtype == np.uint8

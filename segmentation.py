@@ -48,7 +48,7 @@ def select_subject_mask(
         assert candidate.mask is not None
         mask = candidate.mask
         if mask.ndim == 3:
-            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            mask = mask[:, :, 0] if mask.shape[2] == 1 else cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         height, width = mask.shape[:2]
         contained = sum(
             1

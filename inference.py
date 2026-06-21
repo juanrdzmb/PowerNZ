@@ -131,7 +131,9 @@ class InferenceTransform:
         if mask is None:
             return None
         if mask.ndim == 3:
-            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            # MediaPipe Tasks can return an HxWx1 confidence mask whereas
+            # OpenCV's BGR conversion only accepts 3/4-channel images.
+            mask = mask[:, :, 0] if mask.shape[2] == 1 else cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         resized = cv2.resize(
             mask,
             (self.crop_width, self.crop_height),

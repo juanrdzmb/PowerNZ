@@ -62,7 +62,7 @@ def refine_pose_with_mask(
         return pose
 
     if mask.ndim == 3:
-        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        mask = mask[:, :, 0] if mask.shape[2] == 1 else cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
     binary = mask > mask_threshold
     if not np.any(binary):
