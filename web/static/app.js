@@ -22,6 +22,25 @@
     });
   }
 
+  // ---------- Scroll reveal ----------
+  const revealItems = document.querySelectorAll('[data-reveal]');
+  if (revealItems.length) {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || !('IntersectionObserver' in window)) {
+      revealItems.forEach((el) => el.classList.add('in-view'));
+    } else {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('in-view');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+      revealItems.forEach((el) => observer.observe(el));
+    }
+  }
+
   // ---------- Upload affordances ----------
   const fileInput = document.querySelector('#video-input');
   const fileMeta = document.querySelector('[data-file-meta]');

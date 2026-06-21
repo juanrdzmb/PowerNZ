@@ -19,7 +19,7 @@
   </aside>
 </section>
 
-<section class="trust-strip" aria-label="Resumen de privacidad">
+<section class="trust-strip" aria-label="Resumen de privacidad" data-reveal>
   <span><b>EU</b> Procesamiento en región de Madrid</span>
   <span><b>24 H</b> Borrado automático de vídeo, resultado e informes</span>
   <span><b>0</b> Sin entrenamiento de modelos ni analítica publicitaria</span>
@@ -27,7 +27,7 @@
 </section>
 
 {% if recent_jobs %}
-<section class="resume-section" aria-labelledby="resume-title">
+<section class="resume-section" aria-labelledby="resume-title" data-reveal>
   <div>
     <p class="eyebrow">RECUPERAR ANÁLISIS</p>
     <h2 id="resume-title">Tienes un análisis guardado en este navegador.</h2>
@@ -44,7 +44,7 @@
 </section>
 {% endif %}
 
-<section class="upload-section" aria-labelledby="upload-title">
+<section class="upload-section" aria-labelledby="upload-title" data-reveal>
   <div class="section-heading">
     <div>
       <p class="eyebrow">NUEVO ANÁLISIS</p>
@@ -92,7 +92,37 @@
   </form>
 </section>
 
-<section class="tips-strip" aria-label="Consejos de grabación">
+<section class="how-section" aria-labelledby="how-title">
+  <div class="how-head" data-reveal>
+    <div>
+      <p class="eyebrow">CÓMO FUNCIONA</p>
+      <h2 id="how-title">De un clip a tu análisis.</h2>
+    </div>
+    <p>Tres pasos. Sin cuenta, sin instalar nada y con el vídeo borrado a las 24 h.</p>
+  </div>
+  <div class="how-steps">
+    <article class="how-step" data-reveal data-reveal-delay="1">
+      <span class="step-bar" aria-hidden="true"></span>
+      <span class="step-num">01</span>
+      <h3>Sube el vídeo</h3>
+      <p>Un levantamiento corto, cámara estable y la barra visible. De perfil o en diagonal funciona mejor.</p>
+    </article>
+    <article class="how-step" data-reveal data-reveal-delay="2">
+      <span class="step-bar" aria-hidden="true"></span>
+      <span class="step-num">02</span>
+      <h3>PowerNZ lo analiza</h3>
+      <p>Detecta la barra y el atleta, sigue la trayectoria y mide velocidad y repeticiones.</p>
+    </article>
+    <article class="how-step" data-reveal data-reveal-delay="3">
+      <span class="step-bar" aria-hidden="true"></span>
+      <span class="step-num">03</span>
+      <h3>Descarga el resultado</h3>
+      <p>Un vídeo vertical con la trayectoria, la velocidad, las repeticiones y las notas técnicas.</p>
+    </article>
+  </div>
+</section>
+
+<section class="tips-strip" aria-label="Consejos de grabación" data-reveal>
   <p><span>CONSEJO</span> Deja que se vea al menos un disco y la barra durante todo el levantamiento.</p>
   <p><span>PRIVACIDAD</span> No necesitamos tu nombre, correo ni cuenta.</p>
 </section>

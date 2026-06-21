@@ -22,7 +22,7 @@
 </section>
 
 {% if job.status == 'completed' %}
-<section class="result-panel">
+<section class="result-panel" data-reveal>
   <div>
     <p class="eyebrow">RESULTADO</p>
     <h2>Tu vídeo PowerNZ</h2>
@@ -37,7 +37,7 @@
 {% endif %}
 
 {% if job.is_terminal %}
-<section class="feedback-section">
+<section class="feedback-section" data-reveal>
   <div class="feedback-intro">
     <p class="eyebrow">AYÚDANOS A MEJORAR</p>
     <h2>¿Ha visto algo raro?</h2>
