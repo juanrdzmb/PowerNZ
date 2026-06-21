@@ -89,6 +89,33 @@ def test_overlay_telemetry_stats_omit_load_by_default() -> None:
     ]
 
 
+def test_overlay_telemetry_stats_explain_body_proxy_instead_of_drift() -> None:
+    sample = KinematicSample(
+        frame_index=10,
+        time_seconds=0.33,
+        position_m=0.0,
+        velocity_mps=0.0,
+        smoothed_velocity_mps=0.0,
+        state="tirón",
+        rep_index=2,
+        rep_displacement_m=0.42,
+        tracking_source="body_proxy",
+    )
+
+    stats = OverlayRenderer._telemetry_stats(
+        sample=sample,
+        completed_reps=1,
+        bar_drift_cm=None,
+        load_estimate=None,
+    )
+
+    assert stats == [
+        ("REP", "1"),
+        ("ROM", "0.42 m"),
+        ("FUENTE", "MUÑECAS*"),
+    ]
+
+
 def test_overlay_bar_path_breaks_on_missing_segments() -> None:
     renderer = OverlayRenderer(OverlayConfig(background_dim_alpha=0.0, glow_strength=0.0))
     frame = np.zeros((260, 260, 3), dtype=np.uint8)
@@ -239,3 +266,4 @@ def test_overlay_labels_body_proxy_velocity_as_estimated() -> None:
     )
 
     assert "VELOCIDAD CORPORAL*" in drawn
+    assert "* MUÑECAS" in drawn

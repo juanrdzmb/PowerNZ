@@ -286,12 +286,14 @@ class OverlayRenderer:
         load_estimate: LoadEstimate | None,
         rep_text: str | None = None,
     ) -> list[tuple[str, str]]:
-        drift_val = "-" if bar_drift_cm is None else f"{bar_drift_cm:.1f} cm"
-        stats = [
-            ("REP", rep_text or str(completed_reps)),
-            ("ROM", f"{sample.rep_displacement_m:.2f} m"),
-            ("DRIFT", drift_val),
-        ]
+        stats = [("REP", rep_text or str(completed_reps)), ("ROM", f"{sample.rep_displacement_m:.2f} m")]
+        if sample.tracking_source == "body_proxy":
+            # The hub is not visible: make the estimation source explicit instead
+            # of showing a meaningless ``DRIFT --`` field.
+            stats.append(("FUENTE", "MUÑECAS*"))
+        else:
+            drift_val = "-" if bar_drift_cm is None else f"{bar_drift_cm:.1f} cm"
+            stats.append(("DRIFT", drift_val))
         if load_estimate is not None:
             stats.append(("CARGA", f"{load_estimate.total_kg:.0f} kg"))
         return stats
@@ -459,7 +461,11 @@ class OverlayRenderer:
         return output
 
     def _draw_body_proxy(self, frame: Frame, point: Point2D | None) -> None:
-        """Show the hands-derived fallback without pretending it is a hub detection."""
+        """Show a discreet hands-derived fallback marker.
+
+        The telemetry and chart already disclose the estimate.  Keeping the marker
+        unlabeled prevents it competing with the athlete silhouette and pose labels.
+        """
         if point is None:
             return
         scale = self._ui_scale(frame)
@@ -468,7 +474,6 @@ class OverlayRenderer:
         cv2.circle(frame, center, radius + max(3, int(5 * scale)), (30, 90, 108), 1, cv2.LINE_AA)
         cv2.circle(frame, center, radius, ACCENT, max(1, int(2 * scale)), cv2.LINE_AA)
         cv2.circle(frame, center, max(2, int(3 * scale)), (245, 245, 240), -1, cv2.LINE_AA)
-        self._label_pill(frame, "Cuerpo*", (center[0] + radius, center[1]), ACCENT, prefer_above=False)
 
     def _dim_background(self, frame: Frame) -> None:
         frame[:] = (frame.astype(np.float32) * (1.0 - self._config.background_dim_alpha)).astype(np.uint8)
@@ -1114,7 +1119,10 @@ class OverlayRenderer:
                 cv2.line(frame, (plot_x1 - 8, tick_y), (plot_x1 - 2, tick_y), ACCENT_SOFT, 1, cv2.LINE_AA)
                 self._text(frame, value_label, (x1 + 9, tick_y + 5), 0.42, TEXT_DIM, 1, shadow=False)
 
-        metric_label = "VELOCIDAD CUERPO*" if metric_source == "body_proxy" else "VELOCIDAD BARRA"
+        if metric_source == "body_proxy":
+            metric_label = "VEL. CUERPO*" if compact else "VELOCIDAD CORPORAL*"
+        else:
+            metric_label = "VELOCIDAD BARRA"
         self._text(
             frame,
             metric_label,
@@ -1123,7 +1131,7 @@ class OverlayRenderer:
             ACCENT,
             max(1, int(2 * scale)),
         )
-        self._draw_velocity_legend(frame, series, x1, y1, x2)
+        self._draw_velocity_legend(frame, series, x1, y1, x2, metric_source=metric_source)
 
         half_plot = plot_h * 0.40  # leaves headroom so peaks don't touch the panel edge
         for key, _, color, values in series:
@@ -1207,7 +1215,13 @@ class OverlayRenderer:
         x1: int,
         y1: int,
         x2: int,
+        metric_source: str = "bar_hub",
     ) -> None:
+        # With one hands-derived estimate, the headline and the live value already
+        # say everything useful.  A second "Bar" legend would be both redundant and
+        # inaccurate.
+        if metric_source == "body_proxy" and len(series) == 1 and series[0][0] == "bar":
+            return
         scale = self._ui_scale(frame)
         font_scale = max(0.34, 0.48 * scale)
         thickness = 1
@@ -1402,13 +1416,15 @@ class OverlayRenderer:
         if compact:
             # Tight stacked layout for very narrow frames.
             y = div_y + max(22, int(30 * scale))
-            self._text(frame, f"{sample.smoothed_velocity_mps:+.2f} m/s", (text_x, y),
+            compact_label = "V. CUERPO*" if sample.tracking_source == "body_proxy" else "V. BARRA"
+            self._text(frame, f"{compact_label}  {sample.smoothed_velocity_mps:+.2f} m/s", (text_x, y),
                        max(0.5, 0.86 * scale), vel_color, max(1, int(2 * scale)))
             y += max(22, int(30 * scale))
             self._text(frame, f"R{rep_text}   ROM {sample.rep_displacement_m:.2f} m",
                        (text_x, y), max(0.4, 0.54 * scale), TEXT, max(1, int(2 * scale)))
             y += max(20, int(26 * scale))
-            self._text(frame, f"Calidad  {self._quality_text(technique)}", (text_x, y),
+            quality_suffix = "  ·  * muñecas" if sample.tracking_source == "body_proxy" else ""
+            self._text(frame, f"Calidad  {self._quality_text(technique)}{quality_suffix}", (text_x, y),
                        max(0.36, 0.48 * scale), TEXT_DIM, 1, shadow=False)
             return
 
@@ -1441,7 +1457,7 @@ class OverlayRenderer:
         self._text(frame, "CALIDAD", (text_x, q_y), max(0.34, 0.42 * scale), TEXT_DIM, 1, shadow=False)
         self._text(frame, self._quality_text(technique), (text_x + int(98 * scale), q_y),
                    max(0.4, 0.54 * scale), self._quality_color(technique), max(1, int(2 * scale)))
-        view = "-" if technique is None else technique.view.upper()
+        view = "* MUÑECAS" if sample.tracking_source == "body_proxy" else ("-" if technique is None else technique.view.upper())
         vsize, _ = cv2.getTextSize(_ascii(view), UI_FONT, max(0.34, 0.46 * scale), 1)
         self._text(frame, view, (x2 - pad - vsize[0], q_y), max(0.34, 0.46 * scale), TEXT_DIM, 1, shadow=False)
 
