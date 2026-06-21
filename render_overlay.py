@@ -1362,9 +1362,13 @@ class OverlayRenderer:
         if sample is None:
             self._text(frame, "Esperando seguimiento", (text_x, div_y + max(24, int(34 * scale))),
                        max(0.42, 0.6 * scale), TEXT_DIM, max(1, int(2 * scale)))
-            waiting_reps = rep_text if total_reps is not None else f"{completed_reps}"
-            self._text(frame, f"Reps  {waiting_reps}", (text_x, div_y + max(46, int(64 * scale))),
-                       max(0.42, 0.6 * scale), TEXT, max(1, int(2 * scale)))
+            if total_reps == 0:
+                self._text(frame, "Sin repeticion valida", (text_x, div_y + max(46, int(64 * scale))),
+                           max(0.42, 0.6 * scale), TEXT_DIM, max(1, int(2 * scale)))
+            else:
+                waiting_reps = rep_text if total_reps is not None else f"{completed_reps}"
+                self._text(frame, f"Reps  {waiting_reps}", (text_x, div_y + max(46, int(64 * scale))),
+                           max(0.42, 0.6 * scale), TEXT, max(1, int(2 * scale)))
             return
 
         vel_color = color_for_velocity(sample.smoothed_velocity_mps)

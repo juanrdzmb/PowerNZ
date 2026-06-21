@@ -193,3 +193,21 @@ def test_overlay_velocity_chart_can_show_multi_series() -> None:
     series = renderer._velocity_chart_series(history)
 
     assert set(key for key, *_ in series) >= {"bar", "hip", "knee"}
+
+
+def test_overlay_states_no_valid_rep_instead_of_zero_over_zero() -> None:
+    renderer = OverlayRenderer()
+    drawn: list[str] = []
+    renderer._text = lambda _frame, text, *_args, **_kwargs: drawn.append(text)  # type: ignore[method-assign]
+    renderer._rounded_panel = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    renderer._draw_telemetry_panel(
+        frame=np.zeros((720, 720, 3), dtype=np.uint8),
+        sample=None,
+        completed_reps=0,
+        technique=None,
+        total_reps=0,
+    )
+
+    assert "Sin repeticion valida" in drawn
+    assert not any(text == "Reps  0/0" for text in drawn)
