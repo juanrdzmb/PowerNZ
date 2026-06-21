@@ -47,6 +47,9 @@ datasets/plate_dataset/
 
 runs/
 
+# Local private-beta jobs. These can contain uploaded videos and must never be committed.
+web_data/
+
 .idea/
 .vscode/
 .DS_Store

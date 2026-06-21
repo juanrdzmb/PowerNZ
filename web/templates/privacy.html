@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}PowerNZ · Privacidad y uso de datos{% endblock %}
+{% block content %}
+<section class="privacy-page">
+  <a class="back-link" href="/">← Volver a PowerNZ</a>
+  <p class="eyebrow">PRIVACIDAD Y USO DE DATOS</p>
+  <h1>Una beta pequeña<br><em>con límites claros.</em></h1>
+  <p class="privacy-lead">Este aviso explica cómo {{ privacy.controller }} trata los vídeos enviados a PowerNZ Beta. Última actualización: {{ privacy.updated }}.</p>
+
+  <div class="privacy-grid">
+    <article><h2>Responsable y contacto</h2><p>Responsable: {{ privacy.controller }}. Para ejercer derechos o plantear dudas de privacidad, contacta con {{ privacy.contact }}.</p></article>
+    <article><h2>Qué tratamos</h2><p>El vídeo que eliges, el ejercicio y peso opcional, el resultado generado y datos técnicos mínimos del trabajo. No pedimos cuenta, nombre ni correo.</p></article>
+    <article><h2>Para qué y por qué</h2><p>Solo para procesar tu vídeo y devolverte el análisis solicitado. La base es tu consentimiento expreso al enviar el formulario. No se usa para entrenar modelos ni para publicidad.</p></article>
+    <article><h2>Dónde se procesa</h2><p>La aplicación y sus archivos de trabajo se alojan en una VM de Google Cloud en la región de Madrid. No incorpora analítica publicitaria ni comparte los vídeos con otros usuarios.</p></article>
+    <article><h2>Conservación</h2><p>Vídeo original, vídeo analizado, informes y archivos temporales se eliminan automáticamente en 24 horas. Puedes borrar tu trabajo antes desde su página de resultado.</p></article>
+    <article><h2>Tus decisiones</h2><p>Sube solo contenido propio o con permiso de las personas que aparecen. Evita menores y datos médicos. PowerNZ ofrece una lectura técnica orientativa: no es consejo médico ni decisión oficial de competición.</p></article>
+  </div>
+
+  <section class="privacy-callout"><strong>Derechos.</strong> Puedes solicitar acceso, rectificación, supresión o retirar el consentimiento antes de que el trabajo expire. Al retirar el consentimiento, se eliminará el material pendiente cuando sea técnicamente posible.</section>
+  <p class="privacy-fineprint">Este aviso aplica a la beta indicada y se ha redactado siguiendo principios de minimización, limitación de conservación, transparencia y seguridad del RGPD. No sustituye asesoramiento jurídico profesional para un lanzamiento comercial.</p>
+</section>
+{% endblock %}

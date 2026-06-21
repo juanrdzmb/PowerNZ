@@ -85,6 +85,16 @@ cloud/PowerNZ_Colab_Analisis.ipynb
 docs/ANALISIS_EN_COLAB.md
 ```
 
+## Beta Web Privada
+
+También existe una interfaz web para probar PowerNZ con amigos sin que tengan que instalar Python ni clonar el repositorio. La guía local y de publicación está en:
+
+```text
+docs/BETA_WEB.md
+```
+
+Para verla en este PC ejecuto `python -m web` y abro `http://127.0.0.1:8000`. La beta limita los clips a 60 segundos/250 MB, procesa uno cada vez y borra los vídeos automáticamente a las 24 horas.
+
 Para entrenar modelos mas rapido alquilando GPU por horas, deje el flujo de RunPod aqui:
 
 ```text

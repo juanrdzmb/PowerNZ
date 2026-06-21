@@ -853,9 +853,13 @@ class OverlayRenderer:
 
         def _seg_ok(pts: list[tuple[int, int]], i: int) -> bool:
             horizontal = abs(pts[i][0] - pts[i - 1][0])
+            vertical = abs(pts[i][1] - pts[i - 1][1])
             total = float(np.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
-            # Reject big jumps and side-to-side moves (a bar path is near-vertical).
-            return total <= max_jump and horizontal <= max_jump * 0.6
+            # Reject big jumps and mostly side-to-side moves. A bar can drift a
+            # little, but a long horizontal trace is almost always a false hub
+            # detection in the rack/background rather than a real lift path.
+            horizontal_limit = max(12.0 * scale, vertical * 1.15 + 5.0 * scale)
+            return total <= max_jump and horizontal <= horizontal_limit
 
         last_pt: tuple[int, int] | None = None
         for segment in raw_segments:

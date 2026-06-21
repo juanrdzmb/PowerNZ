@@ -103,6 +103,16 @@ def test_overlay_bar_path_breaks_on_missing_segments() -> None:
     assert frame[40, 120].sum() == 0
 
 
+def test_overlay_bar_path_rejects_mostly_horizontal_false_trace() -> None:
+    renderer = OverlayRenderer(OverlayConfig(background_dim_alpha=0.0, glow_strength=0.0))
+    frame = np.zeros((260, 260, 3), dtype=np.uint8)
+
+    renderer._draw_bar_path(frame, [(20.0, 100.0), (80.0, 103.0), (140.0, 106.0)])
+
+    # The end marker remains, but the spurious cross-frame horizontal line is hidden.
+    assert frame[102, 50].sum() == 0
+
+
 def test_overlay_silhouette_alpha_is_attenuated() -> None:
     renderer = OverlayRenderer(OverlayConfig(silhouette_alpha=0.50, background_dim_alpha=0.0, glow_strength=0.0))
     frame = np.zeros((180, 180, 3), dtype=np.uint8)
