@@ -416,6 +416,7 @@ class OverlayRenderer:
         subject_mask: np.ndarray | None = None,
         load_estimate: LoadEstimate | None = None,
         bar_drift_cm: float | None = None,
+        body_proxy_point: Point2D | None = None,
         debug_anchor: bool = False,
     ) -> Frame:
         output = frame.copy()
@@ -434,7 +435,9 @@ class OverlayRenderer:
             self._draw_detections(output, detections)
         if bar_anchor is not None:
             self._draw_bar_anchor(output, bar_anchor, detections, debug_anchor)
-        self._draw_bar_path(output, bar_path or [])
+        body_proxy_active = sample is not None and sample.tracking_source == "body_proxy"
+        self._draw_body_proxy(output, body_proxy_point if body_proxy_active else None)
+        self._draw_bar_path(output, bar_path or [], proxy_mode=body_proxy_active)
         if self._config.body_velocity_display == "compact" and not compact:
             self._draw_anchor_velocities(output, anchor_velocities or [])
         history = anchor_velocity_history
@@ -447,12 +450,25 @@ class OverlayRenderer:
             velocity_frame_history or [],
             max_abs_override=chart_max_abs,
             video_fps=video_fps,
+            metric_source=sample.tracking_source if sample is not None else "bar_hub",
         )
         self._draw_rep_table(output, rep_reports or [], bottom_limit=chart_top, avoid_rect=telemetry_rect)
         # The floating bar-velocity badge was dropped: it sat on top of the plate/hub boxes.
         # The same value lives in the telemetry hero and the bottom chart.
         self._draw_telemetry_panel(output, sample, completed_reps, technique, bar_drift_cm, load_estimate, total_reps)
         return output
+
+    def _draw_body_proxy(self, frame: Frame, point: Point2D | None) -> None:
+        """Show the hands-derived fallback without pretending it is a hub detection."""
+        if point is None:
+            return
+        scale = self._ui_scale(frame)
+        center = (int(point.x), int(point.y))
+        radius = max(5, int(8 * scale))
+        cv2.circle(frame, center, radius + max(3, int(5 * scale)), (30, 90, 108), 1, cv2.LINE_AA)
+        cv2.circle(frame, center, radius, ACCENT, max(1, int(2 * scale)), cv2.LINE_AA)
+        cv2.circle(frame, center, max(2, int(3 * scale)), (245, 245, 240), -1, cv2.LINE_AA)
+        self._label_pill(frame, "Cuerpo*", (center[0] + radius, center[1]), ACCENT, prefer_above=False)
 
     def _dim_background(self, frame: Frame) -> None:
         frame[:] = (frame.astype(np.float32) * (1.0 - self._config.background_dim_alpha)).astype(np.uint8)
@@ -822,7 +838,13 @@ class OverlayRenderer:
             cv2.line(frame, (cx, cy), (cx + dx * length, cy), color, thickness, cv2.LINE_AA)
             cv2.line(frame, (cx, cy), (cx, cy + dy * length), color, thickness, cv2.LINE_AA)
 
-    def _draw_bar_path(self, frame: Frame, bar_path: list[BarPathPoint]) -> None:
+    def _draw_bar_path(
+        self,
+        frame: Frame,
+        bar_path: list[BarPathPoint],
+        *,
+        proxy_mode: bool = False,
+    ) -> None:
         visible_points = [point for point in bar_path if point is not None]
         if len(visible_points) < 2:
             return
@@ -842,6 +864,8 @@ class OverlayRenderer:
         scale = self._ui_scale(frame)
         core_w = max(1, int(2 * scale))
         glow_w = max(2, int(4 * scale))
+        path_core = ACCENT if proxy_mode else TRAJECTORY_COLOR
+        path_glow = ACCENT_SOFT if proxy_mode else TRAJECTORY_GLOW
         max_jump = self._config.path_max_jump_pixels
 
         def _smooth(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -878,21 +902,21 @@ class OverlayRenderer:
 
             for index in range(1, n):
                 if _seg_ok(pts, index):
-                    cv2.line(frame, pts[index - 1], pts[index], TRAJECTORY_GLOW, glow_w, cv2.LINE_AA)
+                    cv2.line(frame, pts[index - 1], pts[index], path_glow, glow_w, cv2.LINE_AA)
             for index in range(1, n):
                 if not _seg_ok(pts, index):
                     continue
                 age = index / max(1, n - 1)
                 fade = 0.35 + 0.65 * age
                 color = tuple(
-                    int(TRAJECTORY_GLOW[k] + (TRAJECTORY_COLOR[k] - TRAJECTORY_GLOW[k]) * fade)
+                    int(path_glow[k] + (path_core[k] - path_glow[k]) * fade)
                     for k in range(3)
                 )
                 cv2.line(frame, pts[index - 1], pts[index], color, core_w, cv2.LINE_AA)
 
         if last_pt is not None:
             cv2.circle(frame, last_pt, max(3, int(4 * scale)), (255, 255, 255), -1, cv2.LINE_AA)
-            cv2.circle(frame, last_pt, max(4, int(6 * scale)), TRAJECTORY_COLOR, max(1, int(1.5 * scale)), cv2.LINE_AA)
+            cv2.circle(frame, last_pt, max(4, int(6 * scale)), path_core, max(1, int(1.5 * scale)), cv2.LINE_AA)
 
     def _draw_bar_velocity_badge(
         self,
@@ -1025,6 +1049,7 @@ class OverlayRenderer:
         frame_history: list[int],
         max_abs_override: float | None = None,
         video_fps: float = 30.0,
+        metric_source: str = "bar_hub",
     ) -> int:
         """Draw the multi-anchor velocity chart and return its top y so the rep
         table can stack above it without overlapping."""
@@ -1089,9 +1114,10 @@ class OverlayRenderer:
                 cv2.line(frame, (plot_x1 - 8, tick_y), (plot_x1 - 2, tick_y), ACCENT_SOFT, 1, cv2.LINE_AA)
                 self._text(frame, value_label, (x1 + 9, tick_y + 5), 0.42, TEXT_DIM, 1, shadow=False)
 
+        metric_label = "VELOCIDAD CUERPO*" if metric_source == "body_proxy" else "VELOCIDAD BARRA"
         self._text(
             frame,
-            "VELOCITY",
+            metric_label,
             (x1 + 12, y1 + int(24 * scale)),
             max(0.42, 0.78 * scale),
             ACCENT,
@@ -1388,7 +1414,12 @@ class OverlayRenderer:
 
         # --- Hero: bar velocity ---
         cap_y = div_y + max(20, int(27 * scale))
-        self._text(frame, "VELOCIDAD DE BARRA", (text_x, cap_y), max(0.34, 0.42 * scale), TEXT_DIM, 1, shadow=False)
+        velocity_label = (
+            "VELOCIDAD CORPORAL*"
+            if sample.tracking_source == "body_proxy"
+            else "VELOCIDAD DE BARRA"
+        )
+        self._text(frame, velocity_label, (text_x, cap_y), max(0.34, 0.42 * scale), TEXT_DIM, 1, shadow=False)
         hero = f"{sample.smoothed_velocity_mps:+.2f}"
         hero_scale = max(0.8, 1.5 * scale)
         hero_th = max(2, int(3 * scale))

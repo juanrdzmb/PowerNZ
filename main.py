@@ -81,6 +81,7 @@ class FrameRecord:
     lockout_ok: bool | None = None
     anchor_velocities: list[AnchorVelocity] = field(default_factory=list)
     bar_path: list[BarPathPoint] = field(default_factory=list)
+    metric_source: str = "bar_hub"
     mask_cached: bool = False
 
 
@@ -693,6 +694,36 @@ def _bar_point_is_plausibly_held(
         abs(point.x - wrist_x) <= max_horizontal
         and abs(point.y - wrist_y) <= max_vertical
     )
+
+
+def _body_bar_proxy_from_pose(pose: PoseResult | None) -> tuple[Point2D, float] | None:
+    """Return a conservative hands-based bar proxy when the hub is occluded.
+
+    In a barbell lift the wrists move with the bar.  This is not a replacement for
+    a detected hub, so callers must label the resulting velocity/trajectory as an
+    estimate.  It lets a clean pose plus a calibrated visible plate still produce
+    useful feedback for frontal videos where the hub is hidden by the athlete.
+    """
+    if pose is None or not pose.detected or not pose.keypoints:
+        return None
+
+    wrists = [
+        keypoint
+        for keypoint in pose.keypoints
+        if keypoint.name in {"left_wrist", "right_wrist"} and keypoint.visibility >= 0.45
+    ]
+    if not wrists:
+        return None
+
+    point = Point2D(
+        sum(keypoint.x for keypoint in wrists) / len(wrists),
+        sum(keypoint.y for keypoint in wrists) / len(wrists),
+    )
+    visibility = min(keypoint.visibility for keypoint in wrists)
+    confidence = visibility * (0.76 if len(wrists) == 2 else 0.58)
+    if confidence < 0.38:
+        return None
+    return point, float(confidence)
 
 
 def _reset_visible_motion_history(
@@ -1668,13 +1699,22 @@ def main() -> None:
             bar_anchor_tracker.set_pose_hint(_bar_height_hint_from_pose(pose))
             bar_anchor = bar_anchor_tracker.update(frame, detections)
             raw_point = measurement_gate.point_for_measurement(bar_anchor) if metric_enabled else None
+            if raw_point is not None and not _bar_point_is_plausibly_held(raw_point, pose, frame.shape):
+                raw_point = None
+            metric_source = "bar_hub"
+            measurement_confidence = bar_anchor.measurement_confidence
+            if raw_point is None and metric_enabled and bar_anchor.rect is not None:
+                body_proxy = _body_bar_proxy_from_pose(pose)
+                if body_proxy is not None:
+                    raw_point, measurement_confidence = body_proxy
+                    metric_source = "body_proxy"
             depth_ok, lockout_ok = _compute_ipf_flags_with_pose_fallback(args.exercise, pose, raw_pose)
             measurement = BarMeasurement(
                 frame_index=frame_index,
                 time_seconds=frame_index / input_metadata.fps,
                 point=raw_point,
                 meters_per_pixel=calibration.meters_per_pixel,
-                confidence=bar_anchor.measurement_confidence,
+                confidence=measurement_confidence,
                 measurable=raw_point is not None and metric_enabled,
             )
             stats["frames"] += 1
@@ -1690,6 +1730,7 @@ def main() -> None:
                 measurement=measurement,
                 depth_ok=depth_ok,
                 lockout_ok=lockout_ok,
+                metric_source=metric_source,
                 mask_cached=athlete_mask is not None,
             )
             timeline[frame_index] = record
@@ -1771,7 +1812,7 @@ def main() -> None:
                         velocity_mps=float(reconstructed_sample.velocity_mps),
                         hub_confidence=anchor.hub_confidence if anchor is not None else 0.0,
                         plate_confidence=anchor.plate_confidence if anchor is not None else 0.0,
-                        tracking_source=anchor.source if anchor is not None else "offline",
+                        tracking_source=record.metric_source,
                     )
                     record.sample = sample
                     record.technique = technique_monitor.update(
@@ -1869,7 +1910,16 @@ def main() -> None:
                 bar_anchor=record.bar_anchor,
                 subject_mask=mask_cache.get(frame_index),
                 load_estimate=record.load_estimate,
-                bar_drift_cm=_bar_path_horizontal_drift_cm(record.bar_path, calibration.meters_per_pixel),
+                bar_drift_cm=(
+                    _bar_path_horizontal_drift_cm(record.bar_path, calibration.meters_per_pixel)
+                    if record.metric_source != "body_proxy"
+                    else None
+                ),
+                body_proxy_point=(
+                    record.measurement.point
+                    if record.metric_source == "body_proxy" and record.measurement is not None
+                    else None
+                ),
                 debug_anchor=args.debug_anchor,
             )
 

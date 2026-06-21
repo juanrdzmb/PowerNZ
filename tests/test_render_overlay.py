@@ -211,3 +211,31 @@ def test_overlay_states_no_valid_rep_instead_of_zero_over_zero() -> None:
 
     assert "Sin repeticion valida" in drawn
     assert not any(text == "Reps  0/0" for text in drawn)
+
+
+def test_overlay_labels_body_proxy_velocity_as_estimated() -> None:
+    renderer = OverlayRenderer()
+    drawn: list[str] = []
+    renderer._text = lambda _frame, text, *_args, **_kwargs: drawn.append(text)  # type: ignore[method-assign]
+    renderer._rounded_panel = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    sample = KinematicSample(
+        frame_index=10,
+        time_seconds=0.33,
+        position_m=0.2,
+        velocity_mps=0.25,
+        smoothed_velocity_mps=0.25,
+        state="tirón",
+        rep_index=1,
+        rep_displacement_m=0.2,
+        tracking_source="body_proxy",
+    )
+
+    renderer._draw_telemetry_panel(
+        frame=np.zeros((720, 720, 3), dtype=np.uint8),
+        sample=sample,
+        completed_reps=0,
+        technique=None,
+        total_reps=1,
+    )
+
+    assert "VELOCIDAD CORPORAL*" in drawn

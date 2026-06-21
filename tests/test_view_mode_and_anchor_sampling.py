@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from bar_anchor import BarAnchorState, BarAnchorTracker, Point2D
 from anchor_metrics import ANCHOR_GROUPS, AnchorVelocity
@@ -10,6 +11,7 @@ from main import (
     _append_visible_motion_history,
     _anchor_point_is_usable,
     _bar_point_is_plausibly_held,
+    _body_bar_proxy_from_pose,
     _compute_ipf_flags_with_pose_fallback,
     _filter_detections_near_bar,
     _manual_load_estimate,
@@ -230,3 +232,21 @@ def test_bar_point_guard_rejects_ceiling_or_background_hub() -> None:
 
     assert _bar_point_is_plausibly_held(Point2D(150.0, 940.0), pose, (1280, 720, 3))
     assert not _bar_point_is_plausibly_held(Point2D(510.0, 240.0), pose, (1280, 720, 3))
+
+
+def test_body_proxy_uses_wrist_midpoint_when_hub_is_occluded() -> None:
+    pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_wrist", 220.0, 640.0, 0.92),
+            PoseKeypoint("right_wrist", 300.0, 660.0, 0.84),
+        ],
+        backend="mediapipe",
+        detected=True,
+    )
+
+    proxy = _body_bar_proxy_from_pose(pose)
+
+    assert proxy is not None
+    point, confidence = proxy
+    assert point == Point2D(260.0, 650.0)
+    assert confidence == pytest.approx(0.84 * 0.76)
