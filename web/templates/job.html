@@ -15,8 +15,9 @@
   </div>
   <div class="status-info">
     <span class="status-kicker" data-status-label>{% if job.status == 'completed' %}COMPLETADO{% elif job.status == 'failed' %}NECESITA OTRO INTENTO{% else %}EN PROCESO{% endif %}</span>
+    <span class="status-dots" aria-hidden="true"><i></i><i></i><i></i></span>
     <h2 data-stage-heading>{{ job.stage }}</h2>
-    <p data-status-detail>{% if job.status == 'completed' %}Tu vídeo final está preparado para descargar.{% elif job.status == 'failed' %}{{ job.error_message }}{% else %}No cierres esta página: puedes esperar aquí mientras trabajamos.{% endif %}</p>
+    <p data-status-detail>{% if job.status == 'completed' %}El vídeo está listo para descargar.{% elif job.status == 'failed' %}{{ job.error_message }}{% else %}Puedes cerrar la pestaña: el análisis continúa y podrás volver desde el inicio.{% endif %}</p>
   </div>
 </section>
 

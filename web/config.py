@@ -29,6 +29,10 @@ class WebConfig:
     # "pose-hull" reuses the pose with no extra model instead of the YOLO segmenter.
     pose_backend: str = "auto"
     segmentation_backend: str = "pose-hull"
+    # Your trained athlete-segmentation weights. Only loaded when the segmentation
+    # backend actually uses a model (auto / yolo-seg); ignored by the fast pose-hull
+    # default. This makes the "quality" silhouette use your model, not a generic one.
+    segmentation_model: str = "models/powerai_athlete_seg.pt"
     normalize_max_dimension: int = 1280
     privacy_controller: str = "PowerNZ Beta"
     privacy_contact: str = "la persona que te compartió este enlace"
@@ -54,6 +58,7 @@ class WebConfig:
             analysis_profile=os.environ.get("POWERNZ_WEB_PROFILE", "balanced"),
             pose_backend=os.environ.get("POWERNZ_WEB_POSE_BACKEND", "auto"),
             segmentation_backend=os.environ.get("POWERNZ_WEB_SEGMENTATION", "pose-hull"),
+            segmentation_model=os.environ.get("POWERNZ_WEB_SEGMENTATION_MODEL", "models/powerai_athlete_seg.pt"),
             normalize_max_dimension=int(os.environ.get("POWERNZ_WEB_NORMALIZE_MAX", 1280)),
             privacy_controller=os.environ.get("POWERNZ_PRIVACY_CONTROLLER", "PowerNZ Beta"),
             privacy_contact=os.environ.get(

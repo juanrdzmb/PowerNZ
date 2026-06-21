@@ -154,6 +154,10 @@ class JobWorker:
             "--log-level",
             "WARNING",
         ]
+        # Use the trained athlete weights when the chosen backend loads a model.
+        seg_model = self.config.root / self.config.segmentation_model
+        if seg_model.exists():
+            command.extend(["--segmentation-model", str(seg_model)])
         if job.load_kg is not None:
             command.extend(["--load-kg", str(job.load_kg)])
 

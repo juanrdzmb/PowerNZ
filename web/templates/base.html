@@ -3,27 +3,40 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="dark">
+    <meta name="color-scheme" content="light dark">
     <title>{% block title %}PowerNZ · Beta privada{% endblock %}</title>
     <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/theme.js"></script>
     <script defer src="/static/app.js"></script>
   </head>
   <body>
-    <div class="page-glow glow-one"></div>
-    <div class="page-glow glow-two"></div>
     <header class="site-header shell">
       <a class="brand" href="/" aria-label="PowerNZ, inicio">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span>Power<span>NZ</span></span>
       </a>
-      <div class="header-actions"><a class="privacy-link" href="/privacy">Privacidad</a><span class="beta-badge">BETA PRIVADA</span></div>
+      <div class="header-actions">
+        <a class="privacy-link" href="/privacy">Privacidad</a>
+        <span class="beta-badge">BETA PRIVADA</span>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Cambiar tema claro u oscuro">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+        </button>
+      </div>
     </header>
     <main class="shell">
       {% block content %}{% endblock %}
     </main>
     <footer class="site-footer shell">
       <span>PowerNZ · análisis de levantamientos</span>
-      <a href="/privacy">Vídeos eliminados automáticamente en 24 h.</a>
+      <a href="/privacy">Los vídeos se eliminan a las 24 h.</a>
     </footer>
+
+    <aside class="privacy-banner" data-privacy-banner aria-label="Aviso de privacidad">
+      <p><b>Privacidad.</b> Usamos solo una cookie técnica necesaria para abrir tu análisis en este navegador. Sin rastreo, perfiles ni publicidad. Tratamos los datos conforme al RGPD (UE) 2016/679 y los vídeos se borran a las 24 h. <a href="/privacy">Leer el aviso</a>.</p>
+      <div class="banner-actions">
+        <button class="banner-accept" type="button" data-privacy-accept>Aceptar</button>
+      </div>
+    </aside>
   </body>
 </html>
