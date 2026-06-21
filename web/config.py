@@ -23,11 +23,11 @@ class WebConfig:
     submissions_per_hour: int = 2
     secure_cookies: bool = False
     analysis_profile: str = "balanced"
-    # Beta defaults favour speed on a CPU-only VM: a single MediaPipe pose pass
-    # and a cheap pose-based silhouette instead of the hybrid YOLO+MediaPipe pose
-    # and the extra YOLO segmentation model. Raise quality with env vars when the
-    # VM has spare time (POWERNZ_WEB_POSE_BACKEND=auto, POWERNZ_WEB_SEGMENTATION=auto).
-    pose_backend: str = "mediapipe"
+    # Beta speed tuning for a CPU-only VM. Pose stays on "auto": it keeps the YOLO
+    # athlete tracker and only adds MediaPipe when it loads, so it never crashes if
+    # MediaPipe is unavailable in the container. The big saving is the silhouette:
+    # "pose-hull" reuses the pose with no extra model instead of the YOLO segmenter.
+    pose_backend: str = "auto"
     segmentation_backend: str = "pose-hull"
     normalize_max_dimension: int = 1280
     privacy_controller: str = "PowerNZ Beta"
@@ -52,7 +52,7 @@ class WebConfig:
             max_duration_seconds=float(os.environ.get("POWERNZ_MAX_DURATION_SECONDS", 60)),
             secure_cookies=os.environ.get("POWERNZ_SECURE_COOKIES", "0") == "1",
             analysis_profile=os.environ.get("POWERNZ_WEB_PROFILE", "balanced"),
-            pose_backend=os.environ.get("POWERNZ_WEB_POSE_BACKEND", "mediapipe"),
+            pose_backend=os.environ.get("POWERNZ_WEB_POSE_BACKEND", "auto"),
             segmentation_backend=os.environ.get("POWERNZ_WEB_SEGMENTATION", "pose-hull"),
             normalize_max_dimension=int(os.environ.get("POWERNZ_WEB_NORMALIZE_MAX", 1280)),
             privacy_controller=os.environ.get("POWERNZ_PRIVACY_CONTROLLER", "PowerNZ Beta"),
