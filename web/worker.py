@@ -63,7 +63,11 @@ class JobWorker:
             self._validate_source(job)
             self.store.update_progress(job.id, 5, "Preparando un formato compatible")
             job.normalized_path.parent.mkdir(parents=True, exist_ok=True)
-            convert_to_mobile_mp4(job.source_path, job.normalized_path, max_dimension=1920)
+            convert_to_mobile_mp4(
+                job.source_path,
+                job.normalized_path,
+                max_dimension=self.config.normalize_max_dimension,
+            )
             self._validate_normalized(job)
             self._ensure_models_are_ready()
             self._run_analysis(job)
@@ -136,7 +140,9 @@ class JobWorker:
             "--profile",
             self.config.analysis_profile,
             "--pose-backend",
-            "auto",
+            self.config.pose_backend,
+            "--segmentation-backend",
+            self.config.segmentation_backend,
             "--calibration-mode",
             "auto",
             "--output-format",
@@ -153,6 +159,12 @@ class JobWorker:
 
         environment = os.environ.copy()
         environment.update({"TMPDIR": str(job_temp), "TEMP": str(job_temp), "TMP": str(job_temp)})
+        # Inside a container the BLAS/OpenMP backends often misread the available
+        # cores and under- or over-subscribe threads. Pin them to the VM's vCPUs so
+        # the per-frame model inference actually uses the machine we are paying for.
+        threads = str(max(1, os.cpu_count() or 1))
+        for thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            environment.setdefault(thread_var, threads)
         self.store.update_progress(job.id, 8, "Analizando técnica y trayectoria")
         process = subprocess.Popen(
             command,

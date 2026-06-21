@@ -23,6 +23,13 @@ class WebConfig:
     submissions_per_hour: int = 2
     secure_cookies: bool = False
     analysis_profile: str = "balanced"
+    # Beta defaults favour speed on a CPU-only VM: a single MediaPipe pose pass
+    # and a cheap pose-based silhouette instead of the hybrid YOLO+MediaPipe pose
+    # and the extra YOLO segmentation model. Raise quality with env vars when the
+    # VM has spare time (POWERNZ_WEB_POSE_BACKEND=auto, POWERNZ_WEB_SEGMENTATION=auto).
+    pose_backend: str = "mediapipe"
+    segmentation_backend: str = "pose-hull"
+    normalize_max_dimension: int = 1280
     privacy_controller: str = "PowerNZ Beta"
     privacy_contact: str = "la persona que te compartió este enlace"
     privacy_notice_version: str = "2026-06-21"
@@ -45,6 +52,9 @@ class WebConfig:
             max_duration_seconds=float(os.environ.get("POWERNZ_MAX_DURATION_SECONDS", 60)),
             secure_cookies=os.environ.get("POWERNZ_SECURE_COOKIES", "0") == "1",
             analysis_profile=os.environ.get("POWERNZ_WEB_PROFILE", "balanced"),
+            pose_backend=os.environ.get("POWERNZ_WEB_POSE_BACKEND", "mediapipe"),
+            segmentation_backend=os.environ.get("POWERNZ_WEB_SEGMENTATION", "pose-hull"),
+            normalize_max_dimension=int(os.environ.get("POWERNZ_WEB_NORMALIZE_MAX", 1280)),
             privacy_controller=os.environ.get("POWERNZ_PRIVACY_CONTROLLER", "PowerNZ Beta"),
             privacy_contact=os.environ.get(
                 "POWERNZ_PRIVACY_CONTACT", "la persona que te compartió este enlace"

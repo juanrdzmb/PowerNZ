@@ -162,7 +162,12 @@ def create_app(config: WebConfig | None = None, *, start_worker: bool = True) ->
             max_age=config.job_ttl_seconds,
             httponly=True,
             secure=config.secure_cookies,
-            samesite="strict",
+            # "lax" (not "strict") so the private cookie still travels when someone
+            # reopens their analysis from an external link (WhatsApp, Telegram…),
+            # which is how a beta tester returns to a job left processing. The job
+            # is still protected by the unguessable secret, and every state-changing
+            # action keeps its own CSRF token, so "lax" does not weaken the beta.
+            samesite="lax",
             path="/",
         )
         return response
