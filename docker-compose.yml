@@ -9,15 +9,15 @@ services:
       POWERNZ_SECURE_COOKIES: "1"
       POWERNZ_MAX_UPLOAD_BYTES: "262144000"
       POWERNZ_MAX_DURATION_SECONDS: "60"
-      # Speed tuning for the CPU-only beta VM. Change these and `docker compose up -d`
-      # (no rebuild) to trade speed for quality:
+      # Quality defaults for the public beta. Change these and `docker compose up -d`
+      # (no rebuild) only when intentionally trading quality for speed:
       #   POWERNZ_WEB_PROFILE: fast | balanced | precision
       #   POWERNZ_WEB_POSE_BACKEND: auto (robust; YOLO + MediaPipe when available)
-      #   POWERNZ_WEB_SEGMENTATION: pose-hull (fast) | none (fastest) | auto (YOLO silhouette)
-      POWERNZ_WEB_PROFILE: fast
+      #   POWERNZ_WEB_SEGMENTATION: auto (trained athlete mask) | pose-hull | none
+      POWERNZ_WEB_PROFILE: balanced
       POWERNZ_WEB_POSE_BACKEND: auto
-      POWERNZ_WEB_SEGMENTATION: pose-hull
-      POWERNZ_WEB_NORMALIZE_MAX: "1280"
+      POWERNZ_WEB_SEGMENTATION: auto
+      POWERNZ_WEB_NORMALIZE_MAX: "1920"
       POWERNZ_PRIVACY_CONTROLLER: ${POWERNZ_PRIVACY_CONTROLLER:-PowerNZ Beta}
       POWERNZ_PRIVACY_CONTACT: ${POWERNZ_PRIVACY_CONTACT:-la persona que te compartió este enlace}
     volumes:

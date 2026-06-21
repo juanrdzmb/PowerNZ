@@ -9,6 +9,7 @@ from metrics import KinematicSample
 from main import (
     _append_visible_motion_history,
     _anchor_point_is_usable,
+    _bar_point_is_plausibly_held,
     _compute_ipf_flags_with_pose_fallback,
     _filter_detections_near_bar,
     _manual_load_estimate,
@@ -215,3 +216,17 @@ def test_filter_keeps_hub_near_kept_plate_even_when_far_from_wrist_center() -> N
 
     assert any(detection.label == "bar_hub" for detection in filtered)
     assert detections[2] not in filtered
+
+
+def test_bar_point_guard_rejects_ceiling_or_background_hub() -> None:
+    pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_wrist", 355.0, 900.0, 0.9),
+            PoseKeypoint("right_wrist", 385.0, 900.0, 0.9),
+        ],
+        backend="yolo",
+        detected=True,
+    )
+
+    assert _bar_point_is_plausibly_held(Point2D(150.0, 940.0), pose, (1280, 720, 3))
+    assert not _bar_point_is_plausibly_held(Point2D(510.0, 240.0), pose, (1280, 720, 3))

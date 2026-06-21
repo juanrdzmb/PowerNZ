@@ -654,6 +654,47 @@ def _bar_height_hint_from_pose(pose: PoseResult | None) -> Point2D | None:
     return Point2D(center_x, center_y)
 
 
+def _bar_point_is_plausibly_held(
+    point: Point2D | None,
+    pose: PoseResult | None,
+    frame_shape: tuple[int, ...],
+) -> bool:
+    """Reject a visually plausible detector point when it is nowhere near the lifter.
+
+    A rack, ceiling fitting or background disc can occasionally resemble a bar hub to
+    the detector.  It must never become a velocity sample merely because the detector
+    is confident.  During a lift the measured hub stays within a generous envelope of
+    the wrists; the envelope deliberately allows the visible outer plate in a lateral
+    view.  When wrists are unavailable we preserve the detector result rather than
+    making the whole analysis fail on a briefly occluded hand.
+    """
+    if point is None:
+        return False
+    if pose is None or not pose.detected or not pose.keypoints:
+        return True
+
+    wrists = [
+        keypoint
+        for keypoint in pose.keypoints
+        if keypoint.name in {"left_wrist", "right_wrist"} and keypoint.visibility >= 0.40
+    ]
+    if not wrists:
+        return True
+
+    wrist_x = sum(keypoint.x for keypoint in wrists) / len(wrists)
+    wrist_y = sum(keypoint.y for keypoint in wrists) / len(wrists)
+    frame_height, frame_width = frame_shape[:2]
+
+    # On a full-height vertical phone video the outside plate can sit a long way to
+    # the side of the hands, but it cannot plausibly be hundreds of pixels above them.
+    max_horizontal = max(110.0, frame_width * 0.38)
+    max_vertical = max(95.0, frame_height * 0.22)
+    return (
+        abs(point.x - wrist_x) <= max_horizontal
+        and abs(point.y - wrist_y) <= max_vertical
+    )
+
+
 def _reset_visible_motion_history(
     bar_path: list[BarPathPoint],
     anchor_velocity_history: dict[str, list[float]],
@@ -1694,12 +1735,35 @@ def main() -> None:
             for frame_index in range(frame_count):
                 record = timeline.get(frame_index)
                 reconstructed_sample = reconstructed_by_frame.get(frame_index)
+                if record is not None and record.bar_anchor is not None:
+                    visual_anchor_point = (
+                        record.bar_anchor.measurement_point or record.bar_anchor.point
+                    )
+                    if not _bar_point_is_plausibly_held(
+                        visual_anchor_point,
+                        record.pose,
+                        (input_metadata.height, input_metadata.width, 3),
+                    ):
+                        # Keep a false rack/background detection out of the output as
+                        # well as out of the metrics. A confident-looking box is still
+                        # misleading when it is not attached to the athlete.
+                        record.bar_anchor = None
                 evidence[frame_index] = (
                     record.depth_ok if record is not None else None,
                     record.lockout_ok if record is not None else None,
                 )
                 anchor_values = {label: float("nan") for label, _ in ANCHOR_GROUPS}
-                if record is not None and reconstructed_sample is not None and reconstructed_sample.valid:
+                held_by_lifter = (
+                    record is not None
+                    and reconstructed_sample is not None
+                    and reconstructed_sample.valid
+                    and _bar_point_is_plausibly_held(
+                        reconstructed_sample.point,
+                        record.pose,
+                        (input_metadata.height, input_metadata.width, 3),
+                    )
+                )
+                if held_by_lifter and record is not None and reconstructed_sample is not None:
                     anchor = record.bar_anchor
                     sample = engine.update_reconstructed(
                         frame_index=frame_index,
@@ -1739,7 +1803,11 @@ def main() -> None:
                     histories[label].append(anchor_values[label])
                 histories["bar"].append(
                     float(reconstructed_sample.velocity_mps)
-                    if reconstructed_sample is not None and reconstructed_sample.valid and reconstructed_sample.velocity_mps is not None
+                    if (
+                        held_by_lifter
+                        and reconstructed_sample is not None
+                        and reconstructed_sample.velocity_mps is not None
+                    )
                     else float("nan")
                 )
                 if record is not None:

@@ -22,18 +22,17 @@ class WebConfig:
     feedback_ttl_seconds: int = 30 * 24 * 60 * 60
     submissions_per_hour: int = 2
     secure_cookies: bool = False
+    # The public beta must match the visual and tracking quality of the local app.
+    # Faster options remain available through environment variables, but are never
+    # the default because reducing inference resolution/segmentation quality makes
+    # velocity, repetitions and the athlete mask visibly unreliable.
     analysis_profile: str = "balanced"
-    # Beta speed tuning for a CPU-only VM. Pose stays on "auto": it keeps the YOLO
-    # athlete tracker and only adds MediaPipe when it loads, so it never crashes if
-    # MediaPipe is unavailable in the container. The big saving is the silhouette:
-    # "pose-hull" reuses the pose with no extra model instead of the YOLO segmenter.
     pose_backend: str = "auto"
-    segmentation_backend: str = "pose-hull"
-    # Your trained athlete-segmentation weights. Only loaded when the segmentation
-    # backend actually uses a model (auto / yolo-seg); ignored by the fast pose-hull
-    # default. This makes the "quality" silhouette use your model, not a generic one.
+    segmentation_backend: str = "auto"
+    # The trained athlete segmentation model is used by the automatic backend;
+    # pose-hull is only its safe fallback when a model cannot load.
     segmentation_model: str = "models/powerai_athlete_seg.pt"
-    normalize_max_dimension: int = 1280
+    normalize_max_dimension: int = 1920
     privacy_controller: str = "PowerNZ Beta"
     privacy_contact: str = "la persona que te compartió este enlace"
     privacy_notice_version: str = "2026-06-21"
@@ -57,9 +56,9 @@ class WebConfig:
             secure_cookies=os.environ.get("POWERNZ_SECURE_COOKIES", "0") == "1",
             analysis_profile=os.environ.get("POWERNZ_WEB_PROFILE", "balanced"),
             pose_backend=os.environ.get("POWERNZ_WEB_POSE_BACKEND", "auto"),
-            segmentation_backend=os.environ.get("POWERNZ_WEB_SEGMENTATION", "pose-hull"),
+            segmentation_backend=os.environ.get("POWERNZ_WEB_SEGMENTATION", "auto"),
             segmentation_model=os.environ.get("POWERNZ_WEB_SEGMENTATION_MODEL", "models/powerai_athlete_seg.pt"),
-            normalize_max_dimension=int(os.environ.get("POWERNZ_WEB_NORMALIZE_MAX", 1280)),
+            normalize_max_dimension=int(os.environ.get("POWERNZ_WEB_NORMALIZE_MAX", 1920)),
             privacy_controller=os.environ.get("POWERNZ_PRIVACY_CONTROLLER", "PowerNZ Beta"),
             privacy_contact=os.environ.get(
                 "POWERNZ_PRIVACY_CONTACT", "la persona que te compartió este enlace"

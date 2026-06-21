@@ -145,7 +145,7 @@ def test_overlay_pose_smoothing_rejects_large_keypoint_jump() -> None:
     assert shoulder.y == 100.0
 
 
-def test_overlay_draws_full_plate_box_by_default_without_fake_hub() -> None:
+def test_overlay_draws_clean_plate_corner_box_by_default_without_fake_hub() -> None:
     renderer = OverlayRenderer(OverlayConfig(background_dim_alpha=0.0, glow_strength=0.0))
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
     anchor = BarAnchorState(
@@ -160,10 +160,12 @@ def test_overlay_draws_full_plate_box_by_default_without_fake_hub() -> None:
         measurable=False,
     )
 
-    output = renderer.render(frame=frame, bar_anchor=anchor)
+    output = frame.copy()
+    renderer._draw_bar_anchor(output, anchor, [], False)
 
-    assert output[70, 160].sum() > 0
-    assert output[120, 100].sum() > 0
+    assert output[70, 110].sum() > 0
+    assert output[85, 100].sum() > 0
+    assert output[70, 160].sum() == 0
     assert output[120, 160].sum() == 0
 
 

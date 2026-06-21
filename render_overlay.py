@@ -92,6 +92,8 @@ HUB_COLOR = (70, 200, 250)        # amber hub marker
 # out from the cyan plate box (same-colour lines used to camouflage the path).
 TRAJECTORY_COLOR = (80, 205, 255)   # bright amber core
 TRAJECTORY_GLOW = (18, 85, 140)     # dark amber halo for contrast on any background
+SILHOUETTE_TINT = (238, 215, 80)    # teal-blue athlete fill, distinct from the white skeleton
+SILHOUETTE_OUTLINE = (236, 228, 158)
 
 
 # OpenCV's Hershey fonts have no glyphs for accented characters, so Spanish text
@@ -227,7 +229,7 @@ class OverlayConfig:
     glow_strength: float = 0.07
     panel_alpha: float = 0.72
     background_dim_alpha: float = 0.5
-    silhouette_alpha: float = 0.26
+    silhouette_alpha: float = 0.34
     pose_smoothing_alpha: float = 0.08
     pose_deadband_pixels: float = 10.0
     pose_max_jump_ratio: float = 0.18
@@ -238,7 +240,7 @@ class OverlayConfig:
     # The tracked rect is sized for the metric scale (~0.72 of the plate); enlarge it
     # only for display so the corner brackets sit on the disc edge.
     plate_box_display_scale: float = 1.36
-    plate_box_style: str = "full"
+    plate_box_style: str = "corners"
     velocity_window_seconds: float = 4.5
     visual_hold_frames: int = 8
 
@@ -466,7 +468,9 @@ class OverlayRenderer:
         if not np.any(alpha > 0.01):
             return
 
-        silhouette = np.full_like(frame, (252, 252, 245), dtype=np.uint8)
+        # A cool, translucent tint keeps the real athlete visible and clearly
+        # separates their trained segmentation from the dimmed gym background.
+        silhouette = np.full_like(frame, SILHOUETTE_TINT, dtype=np.uint8)
         alpha_3 = alpha[:, :, None]
         blended = frame.astype(np.float32) * (1.0 - alpha_3) + silhouette.astype(np.float32) * alpha_3
         frame[:] = blended.clip(0, 255).astype(np.uint8)
@@ -503,7 +507,7 @@ class OverlayRenderer:
         np.clip(frame.astype(np.float32) + tint, 0, 255, out=tint)
         frame[:] = tint.astype(np.uint8)
 
-        cv2.drawContours(frame, contours, -1, (248, 248, 244), max(1, int(2 * scale)), cv2.LINE_AA)
+        cv2.drawContours(frame, contours, -1, SILHOUETTE_OUTLINE, max(1, int(2 * scale)), cv2.LINE_AA)
 
     def _smooth_pose(self, pose: PoseResult, frame: Frame) -> PoseResult:
         if not pose.detected:
