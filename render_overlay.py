@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from statistics import median
 
 import cv2
 import numpy as np
@@ -241,6 +242,7 @@ class OverlayConfig:
     plate_box_style: str = "corners"
     velocity_window_seconds: float = 4.5
     visual_hold_frames: int = 8
+    path_reference_enabled: bool = True
 
 
 class OverlayRenderer:
@@ -894,6 +896,21 @@ class OverlayRenderer:
             raw_segments.append(current)
 
         scale = self._ui_scale(frame)
+        if self._config.path_reference_enabled:
+            reference = self._path_reference_geometry(bar_path, min_span=max(22.0, 34.0 * scale))
+            if reference is not None:
+                reference_x, top_y, bottom_y, start_y = reference
+                self._draw_dashed_vertical(
+                    frame,
+                    int(reference_x),
+                    int(top_y),
+                    int(bottom_y),
+                    ACCENT_SOFT,
+                    scale,
+                )
+                start = (int(reference_x), int(start_y))
+                cv2.circle(frame, start, max(3, int(4 * scale)), (18, 18, 20), -1, cv2.LINE_AA)
+                cv2.circle(frame, start, max(3, int(4 * scale)), ACCENT, 1, cv2.LINE_AA)
         core_w = max(1, int(2 * scale))
         glow_w = max(2, int(4 * scale))
         path_core = ACCENT if proxy_mode else TRAJECTORY_COLOR
@@ -949,6 +966,40 @@ class OverlayRenderer:
         if last_pt is not None:
             cv2.circle(frame, last_pt, max(3, int(4 * scale)), (255, 255, 255), -1, cv2.LINE_AA)
             cv2.circle(frame, last_pt, max(4, int(6 * scale)), path_core, max(1, int(1.5 * scale)), cv2.LINE_AA)
+
+    @staticmethod
+    def _path_reference_geometry(
+        bar_path: list[BarPathPoint],
+        min_span: float = 22.0,
+    ) -> tuple[float, float, float, float] | None:
+        """Return a robust vertical reference for the current repetition path."""
+        points = [point for point in bar_path if point is not None]
+        if len(points) < 3:
+            return None
+        top_y = min(point[1] for point in points)
+        bottom_y = max(point[1] for point in points)
+        if bottom_y - top_y < min_span:
+            return None
+        seed = points[: min(5, len(points))]
+        reference_x = float(median(point[0] for point in seed))
+        return reference_x, float(top_y), float(bottom_y), float(seed[0][1])
+
+    @staticmethod
+    def _draw_dashed_vertical(
+        frame: Frame,
+        x: int,
+        y1: int,
+        y2: int,
+        color: tuple[int, int, int],
+        scale: float,
+    ) -> None:
+        dash = max(4, int(7 * scale))
+        gap = max(3, int(5 * scale))
+        y = min(y1, y2)
+        end = max(y1, y2)
+        while y < end:
+            cv2.line(frame, (x, y), (x, min(end, y + dash)), color, 1, cv2.LINE_AA)
+            y += dash + gap
 
     def _draw_bar_velocity_badge(
         self,
@@ -1517,9 +1568,46 @@ class OverlayRenderer:
         self._text(frame, "CALIDAD", (text_x, q_y), max(0.34, 0.42 * scale), TEXT_DIM, 1, shadow=False)
         self._text(frame, self._quality_text(technique), (text_x + int(98 * scale), q_y),
                    max(0.4, 0.54 * scale), self._quality_color(technique), max(1, int(2 * scale)))
-        view = "* MUÑECAS" if sample.tracking_source == "body_proxy" else ("-" if technique is None else technique.view.upper())
-        vsize, _ = cv2.getTextSize(_ascii(view), UI_FONT, max(0.34, 0.46 * scale), 1)
-        self._text(frame, view, (x2 - pad - vsize[0], q_y), max(0.34, 0.46 * scale), TEXT_DIM, 1, shadow=False)
+        signal = self._signal_label(sample, technique)
+        signal_scale = max(0.30, 0.40 * scale)
+        vsize, _ = cv2.getTextSize(_ascii(signal), UI_FONT, signal_scale, 1)
+        self._text(
+            frame,
+            signal,
+            (x2 - pad - vsize[0], q_y),
+            signal_scale,
+            self._signal_color(sample),
+            1,
+            shadow=False,
+        )
+
+    @staticmethod
+    def _signal_label(
+        sample: KinematicSample,
+        technique: TechniqueAssessment | None,
+    ) -> str:
+        view = "-" if technique is None else technique.view.upper()
+        if sample.tracking_source == "body_proxy":
+            return "* MUÑECAS"
+        if sample.tracking_source == "plate_center":
+            return f"{view} · DISCO {sample.plate_confidence * 100:.0f}%"
+        if sample.hub_confidence > 0 and sample.plate_confidence > 0:
+            confidence = sample.hub_confidence * 0.72 + sample.plate_confidence * 0.28
+            return f"{view} · HUB+DISCO {confidence * 100:.0f}%"
+        confidence = max(sample.hub_confidence, sample.plate_confidence)
+        source = "HUB" if sample.hub_confidence >= sample.plate_confidence else "DISCO"
+        return f"{view} · {source} {confidence * 100:.0f}%"
+
+    @staticmethod
+    def _signal_color(sample: KinematicSample) -> tuple[int, int, int]:
+        if sample.tracking_source == "body_proxy":
+            return ACCENT
+        confidence = max(sample.hub_confidence, sample.plate_confidence)
+        if confidence >= 0.65:
+            return POS_COLOR
+        if confidence >= 0.40:
+            return ACCENT
+        return NEG_COLOR
 
     def _draw_state_pill(
         self,

@@ -140,6 +140,17 @@ def test_overlay_bar_path_rejects_mostly_horizontal_false_trace() -> None:
     assert frame[102, 50].sum() == 0
 
 
+def test_bar_path_reference_uses_robust_start_axis_and_requires_travel() -> None:
+    reference = OverlayRenderer._path_reference_geometry(
+        [(100.0, 220.0), (102.0, 200.0), (99.0, 180.0), (101.0, 150.0)]
+    )
+
+    assert reference == (100.5, 150.0, 220.0, 220.0)
+    assert OverlayRenderer._path_reference_geometry(
+        [(100.0, 200.0), (130.0, 202.0), (160.0, 204.0)]
+    ) is None
+
+
 def test_overlay_silhouette_alpha_is_attenuated() -> None:
     renderer = OverlayRenderer(OverlayConfig(silhouette_alpha=0.50, background_dim_alpha=0.0, glow_strength=0.0))
     frame = np.zeros((180, 180, 3), dtype=np.uint8)
@@ -295,6 +306,23 @@ def test_overlay_labels_plate_center_velocity_as_bar_from_disc() -> None:
 
     assert "VELOCIDAD BARRA · CENTRO DE DISCO" in drawn
     assert "VELOCIDAD CORPORAL*" not in drawn
+
+
+def test_signal_label_discloses_measurement_source_and_confidence() -> None:
+    fused = KinematicSample(
+        1, 0.03, 0.1, 0.2, 0.2, "tirón", 1, 0.1,
+        hub_confidence=0.80,
+        plate_confidence=0.70,
+        tracking_source="bar_hub",
+    )
+    plate = KinematicSample(
+        1, 0.03, 0.1, 0.2, 0.2, "tirón", 1, 0.1,
+        plate_confidence=0.76,
+        tracking_source="plate_center",
+    )
+
+    assert OverlayRenderer._signal_label(fused, None) == "- · HUB+DISCO 77%"
+    assert OverlayRenderer._signal_label(plate, None) == "- · DISCO 76%"
 
 
 def test_lateral_overlay_draws_torso_axis_but_frontal_does_not() -> None:
