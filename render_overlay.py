@@ -77,23 +77,21 @@ TTF_FONT_CANDIDATES = (
 
 
 # --- Cohesive UI palette (BGR) for a clean, professional overlay ------------
-PANEL_BG = (24, 21, 25)          # near-black glass, slightly cool
-PANEL_BORDER = (64, 58, 66)      # subtle hairline
-ACCENT = (224, 198, 96)          # refined aqua/cyan (BGR) — the single brand accent
-ACCENT_SOFT = (150, 132, 64)
+PANEL_BG = (20, 20, 22)          # neutral graphite glass
+PANEL_BORDER = (70, 70, 74)      # subtle neutral hairline
+ACCENT = (186, 174, 104)         # restrained blue-grey accent (BGR)
+ACCENT_SOFT = (112, 106, 70)
 TEXT = (245, 245, 243)
-TEXT_DIM = (166, 160, 156)       # muted neutral gray for captions
-POS_COLOR = (120, 235, 140)      # upward velocity (green)
-NEG_COLOR = (95, 120, 240)       # downward velocity (red)
+TEXT_DIM = (166, 166, 166)       # muted neutral gray for captions
+POS_COLOR = (142, 205, 150)      # restrained upward green
+NEG_COLOR = (118, 132, 218)      # restrained downward coral
 NEUTRAL_COLOR = (208, 208, 208)
-PLATE_BOX_COLOR = (224, 198, 96)  # aqua box around the plate (matches accent)
-HUB_COLOR = (70, 200, 250)        # amber hub marker
-# Trajectory shares the hub's amber so the bar path reads as the hub's trail, and stands
-# out from the cyan plate box (same-colour lines used to camouflage the path).
-TRAJECTORY_COLOR = (80, 205, 255)   # bright amber core
-TRAJECTORY_GLOW = (18, 85, 140)     # dark amber halo for contrast on any background
-SILHOUETTE_TINT = (238, 215, 80)    # teal-blue athlete fill, distinct from the white skeleton
-SILHOUETTE_OUTLINE = (236, 228, 158)
+PLATE_BOX_COLOR = ACCENT           # one visual accent for plate, torso and path
+HUB_COLOR = (224, 224, 220)        # quiet neutral hub marker
+TRAJECTORY_COLOR = ACCENT          # coherent, restrained bar trail
+TRAJECTORY_GLOW = (48, 46, 34)     # dark halo for contrast, not a neon glow
+SILHOUETTE_TINT = (92, 92, 96)      # neutral graphite fill; no neon body wash
+SILHOUETTE_OUTLINE = (196, 196, 190)
 
 
 # OpenCV's Hershey fonts have no glyphs for accented characters, so Spanish text
@@ -226,17 +224,17 @@ def color_for_velocity(velocity_mps: float) -> tuple[int, int, int]:
 class OverlayConfig:
     keypoint_visibility_threshold: float = 0.35
     glow_radius: int = 20
-    glow_strength: float = 0.07
-    panel_alpha: float = 0.72
-    background_dim_alpha: float = 0.5
-    silhouette_alpha: float = 0.34
+    glow_strength: float = 0.025
+    panel_alpha: float = 0.80
+    background_dim_alpha: float = 0.28
+    silhouette_alpha: float = 0.14
     pose_smoothing_alpha: float = 0.08
     pose_deadband_pixels: float = 10.0
     pose_max_jump_ratio: float = 0.18
     path_max_jump_pixels: float = 85.0
     biomechanical_skeleton_only: bool = True
     velocity_chart_mode: str = "bar"
-    body_velocity_display: str = "compact"
+    body_velocity_display: str = "off"
     # The tracked rect is sized for the metric scale (~0.72 of the plate); enlarge it
     # only for display so the corner brackets sit on the disc edge.
     plate_box_display_scale: float = 1.36
@@ -420,6 +418,7 @@ class OverlayRenderer:
         bar_drift_cm: float | None = None,
         body_proxy_point: Point2D | None = None,
         debug_anchor: bool = False,
+        view_mode: str = "diagonal",
     ) -> Frame:
         output = frame.copy()
         pose = pose or PoseResult(keypoints=[], backend="mediapipe", detected=False)
@@ -432,6 +431,7 @@ class OverlayRenderer:
         compact = self._is_compact(output)
         telemetry_rect = self._telemetry_rect(output)
         self._draw_subject_glow(output, pose, detections)
+        self._draw_torso_guide(output, pose, technique, view_mode)
         self._draw_pose(output, pose)
         if debug_anchor:
             self._draw_detections(output, detections)
@@ -518,17 +518,44 @@ class OverlayRenderer:
         if not contours:
             return
 
-        glow = np.zeros(frame.shape[:2], dtype=np.uint8)
-        cv2.drawContours(glow, contours, -1, 255, max(3, int(7 * scale)), cv2.LINE_AA)
-        radius = self._ensure_odd(int(13 * scale))
-        glow = cv2.GaussianBlur(glow, (radius, radius), 0)
-        tint = np.zeros_like(frame, dtype=np.float32)
-        for channel in range(3):
-            tint[:, :, channel] = glow.astype(np.float32) / 255.0 * ACCENT[channel] * 0.45
-        np.clip(frame.astype(np.float32) + tint, 0, 255, out=tint)
-        frame[:] = tint.astype(np.uint8)
+        # One quiet contour replaces the previous cyan halo.  A dark under-stroke
+        # keeps it legible on bright walls without making the athlete glow.
+        cv2.drawContours(frame, contours, -1, (18, 18, 20), max(2, int(3 * scale)), cv2.LINE_AA)
+        cv2.drawContours(frame, contours, -1, SILHOUETTE_OUTLINE, max(1, int(1.3 * scale)), cv2.LINE_AA)
 
-        cv2.drawContours(frame, contours, -1, SILHOUETTE_OUTLINE, max(1, int(2 * scale)), cv2.LINE_AA)
+    def _draw_torso_guide(
+        self,
+        frame: Frame,
+        pose: PoseResult,
+        technique: TechniqueAssessment | None,
+        view_mode: str,
+    ) -> None:
+        """Draw a clean shoulder-to-hip axis for lateral technique review."""
+        if view_mode != "lateral" or not pose.detected:
+            return
+        visible = self._visible_keypoints(pose)
+
+        def midpoint(names: tuple[str, str]) -> tuple[int, int] | None:
+            points = [visible[name] for name in names if name in visible]
+            if not points:
+                return None
+            return (
+                int(sum(point.x for point in points) / len(points)),
+                int(sum(point.y for point in points) / len(points)),
+            )
+
+        shoulder = midpoint(("left_shoulder", "right_shoulder"))
+        hip = midpoint(("left_hip", "right_hip"))
+        if shoulder is None or hip is None:
+            return
+        scale = self._ui_scale(frame)
+        cv2.line(frame, shoulder, hip, (16, 16, 18), max(3, int(4 * scale)), cv2.LINE_AA)
+        cv2.line(frame, shoulder, hip, ACCENT, max(1, int(2 * scale)), cv2.LINE_AA)
+        for point in (shoulder, hip):
+            cv2.circle(frame, point, max(2, int(3 * scale)), TEXT, -1, cv2.LINE_AA)
+        if technique is not None and technique.torso_angle_degrees is not None:
+            label = f"TORSO {technique.torso_angle_degrees:.0f}°"
+            self._label_pill(frame, label, (shoulder[0] + int(8 * scale), shoulder[1]), ACCENT)
 
     def _smooth_pose(self, pose: PoseResult, frame: Frame) -> PoseResult:
         if not pose.detected:
@@ -1107,6 +1134,10 @@ class OverlayRenderer:
             max_abs = max(0.75, max(abs(value) for value in all_values))
         zero_y = int(plot_y1 + plot_h / 2)
         self._draw_rep_bands(frame, rep_reports, frame_history[start_index:], plot_x1, plot_y1, plot_x2, plot_y2)
+        direction_layer = frame.copy()
+        cv2.rectangle(direction_layer, (plot_x1, plot_y1), (plot_x2, zero_y), POS_COLOR, -1)
+        cv2.rectangle(direction_layer, (plot_x1, zero_y), (plot_x2, plot_y2), NEG_COLOR, -1)
+        cv2.addWeighted(direction_layer, 0.035, frame, 0.965, 0, dst=frame)
         cv2.line(frame, (plot_x1, zero_y), (plot_x2, zero_y), PANEL_BORDER, 1, cv2.LINE_AA)
 
         if not compact:
@@ -1118,6 +1149,8 @@ class OverlayRenderer:
                 value_label = "0" if frac == 0.5 else f"{prefix}{max_abs:.2f}"
                 cv2.line(frame, (plot_x1 - 8, tick_y), (plot_x1 - 2, tick_y), ACCENT_SOFT, 1, cv2.LINE_AA)
                 self._text(frame, value_label, (x1 + 9, tick_y + 5), 0.42, TEXT_DIM, 1, shadow=False)
+            self._text(frame, "SUBE", (plot_x2 - int(48 * scale), plot_y1 + int(13 * scale)), 0.34, POS_COLOR, 1, shadow=False)
+            self._text(frame, "BAJA", (plot_x2 - int(48 * scale), plot_y2 - int(4 * scale)), 0.34, NEG_COLOR, 1, shadow=False)
 
         if metric_source == "body_proxy":
             metric_label = "VEL. CUERPO*" if compact else "VELOCIDAD CORPORAL*"
@@ -1154,9 +1187,16 @@ class OverlayRenderer:
             # The bar curve is the headline metric: draw it thicker so it
             # stays readable when the hip/shoulder/knee curves cross it.
             line_thickness = max(1, int(2 * scale)) if key == "bar" else 1
-            poly = [pt for pt in points if pt is not None]
-            if len(poly) >= 2:
-                cv2.polylines(frame, [np.array(poly, dtype=np.int32)], False, color, line_thickness, cv2.LINE_AA)
+            for poly in self._split_chart_points(points):
+                if len(poly) >= 2:
+                    cv2.polylines(
+                        frame,
+                        [np.array(poly, dtype=np.int32)],
+                        False,
+                        color,
+                        line_thickness,
+                        cv2.LINE_AA,
+                    )
 
             last_point = next((point for point in reversed(points) if point is not None), None)
             if last_point is not None:
@@ -1183,6 +1223,24 @@ class OverlayRenderer:
                 self._text(frame, "m/s", (x2 - unit_w - 4, y1 + int(27 * scale)), 0.54, TEXT_DIM, 2)
 
         return y1
+
+    @staticmethod
+    def _split_chart_points(
+        points: list[tuple[int, int] | None],
+    ) -> list[list[tuple[int, int]]]:
+        """Keep missing measurements as real visual gaps in the graph."""
+        segments: list[list[tuple[int, int]]] = []
+        current: list[tuple[int, int]] = []
+        for point in points:
+            if point is None:
+                if current:
+                    segments.append(current)
+                    current = []
+                continue
+            current.append(point)
+        if current:
+            segments.append(current)
+        return segments
 
     @staticmethod
     def _interpolate_gaps(values: list[float], max_gap: int = 6) -> list[float]:

@@ -68,6 +68,7 @@ def reconstruct_bar_kinematics(
             observed[index] = True
 
     _reject_teleports(positions, times, observed, max_speed_mps)
+    _reject_local_spikes(positions, times, observed)
     observed &= np.isfinite(positions)
     _interpolate_short_gaps(positions, max_gap_frames)
     _interpolate_short_gaps(xs, max_gap_frames)
@@ -76,14 +77,16 @@ def reconstruct_bar_kinematics(
     radius = max(2, int(round(window_seconds * max(1.0, fps) / 2.0)))
     velocities = _local_polynomial_velocity(positions, times, radius)
     smoothed_positions = _local_polynomial_position(positions, times, radius)
+    smoothed_xs = _local_polynomial_position(xs, times, max(2, radius // 2))
+    smoothed_ys = _local_polynomial_position(ys, times, max(2, radius // 2))
 
     result: list[ReconstructedBarSample] = []
     for index, measurement in enumerate(ordered):
         is_observed = bool(observed[index])
         valid = bool(is_observed and np.isfinite(velocities[index]) and np.isfinite(smoothed_positions[index]))
         point = (
-            Point2D(float(xs[index]), float(ys[index]))
-            if valid and np.isfinite(xs[index]) and np.isfinite(ys[index])
+            Point2D(float(smoothed_xs[index]), float(smoothed_ys[index]))
+            if valid and np.isfinite(smoothed_xs[index]) and np.isfinite(smoothed_ys[index])
             else None
         )
         result.append(
@@ -118,6 +121,40 @@ def _reject_teleports(
                 observed[index] = False
                 continue
         previous = index
+
+
+def _reject_local_spikes(
+    positions: np.ndarray,
+    times: np.ndarray,
+    observed: np.ndarray,
+    min_residual_m: float = 0.018,
+) -> None:
+    """Remove isolated detector jumps that are fast but not quite teleports.
+
+    A hub box can jump a few centimetres for one frame and still remain below the
+    absolute speed limit.  Differentiating that point creates the characteristic
+    false down/up spike.  A genuine bar path is locally smooth at video frame rates,
+    so compare each observation with the time-interpolated position of its immediate
+    neighbours and reject only isolated residuals above 18 mm.
+    """
+    rejected: list[int] = []
+    for index in range(1, len(positions) - 1):
+        if not (observed[index - 1] and observed[index] and observed[index + 1]):
+            continue
+        total_dt = times[index + 1] - times[index - 1]
+        if total_dt <= 0:
+            continue
+        fraction = (times[index] - times[index - 1]) / total_dt
+        expected = positions[index - 1] + fraction * (positions[index + 1] - positions[index - 1])
+        residual = abs(positions[index] - expected)
+        neighbour_motion = abs(positions[index + 1] - positions[index - 1])
+        threshold = max(min_residual_m, neighbour_motion * 0.65)
+        if residual > threshold:
+            rejected.append(index)
+
+    for index in rejected:
+        positions[index] = np.nan
+        observed[index] = False
 
 
 def _interpolate_short_gaps(values: np.ndarray, max_gap_frames: int) -> None:

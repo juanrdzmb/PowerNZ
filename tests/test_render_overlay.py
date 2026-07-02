@@ -147,7 +147,9 @@ def test_overlay_silhouette_alpha_is_attenuated() -> None:
 
     output = renderer.render(frame=frame, subject_mask=mask)
 
-    assert 115 <= int(output[140, 140, 0]) <= 135
+    pixel = output[140, 140]
+    assert 40 <= int(pixel[0]) <= 55
+    assert max(int(channel) for channel in pixel) - min(int(channel) for channel in pixel) <= 5
 
 
 def test_overlay_pose_smoothing_rejects_large_keypoint_jump() -> None:
@@ -222,6 +224,14 @@ def test_overlay_velocity_chart_can_show_multi_series() -> None:
     assert set(key for key, *_ in series) >= {"bar", "hip", "knee"}
 
 
+def test_velocity_chart_does_not_connect_across_missing_measurements() -> None:
+    segments = OverlayRenderer._split_chart_points(
+        [(10, 20), (20, 18), None, (40, 16), (50, 14)]
+    )
+
+    assert segments == [[(10, 20), (20, 18)], [(40, 16), (50, 14)]]
+
+
 def test_overlay_states_no_valid_rep_instead_of_zero_over_zero() -> None:
     renderer = OverlayRenderer()
     drawn: list[str] = []
@@ -285,3 +295,25 @@ def test_overlay_labels_plate_center_velocity_as_bar_from_disc() -> None:
 
     assert "VELOCIDAD BARRA · CENTRO DE DISCO" in drawn
     assert "VELOCIDAD CORPORAL*" not in drawn
+
+
+def test_lateral_overlay_draws_torso_axis_but_frontal_does_not() -> None:
+    pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_shoulder", 100.0, 80.0, 0.9),
+            PoseKeypoint("right_shoulder", 104.0, 82.0, 0.9),
+            PoseKeypoint("left_hip", 130.0, 180.0, 0.9),
+            PoseKeypoint("right_hip", 134.0, 182.0, 0.9),
+        ],
+        backend="yolo",
+        detected=True,
+    )
+    renderer = OverlayRenderer(OverlayConfig(background_dim_alpha=0.0, glow_strength=0.0))
+    lateral = np.zeros((260, 260, 3), dtype=np.uint8)
+    frontal = lateral.copy()
+
+    renderer._draw_torso_guide(lateral, pose, None, "lateral")
+    renderer._draw_torso_guide(frontal, pose, None, "frontal")
+
+    assert lateral.sum() > 0
+    assert frontal.sum() == 0

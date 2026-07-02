@@ -4,6 +4,8 @@ PowerNZ es mi herramienta para analizar videos de powerlifting con vision por co
 
 El objetivo de esta v1 no es llenar la pantalla de lineas. Quiero que el video diga lo importante: donde esta el plato, donde esta el hub de la barra, como se mueve la barra, que velocidad lleva y si la repeticion cumple una lectura tecnica razonable basada en reglas IPF.
 
+Consulta el [plan de fiabilidad de trayectoria y velocidad](docs/PLAN_FIABILIDAD_TRAYECTORIA.md) para entender qué se corrige en código y cuándo merece la pena reentrenar los modelos.
+
 ## Que Hace
 
 - Usa `models/powerai_bar_detector.pt` para detectar `plate` y `bar_hub`.
@@ -103,6 +105,14 @@ runpod/setup_runpod.sh
 runpod/train_runpod.sh
 ```
 
+Para entrenar desde Windows usando créditos de Google Cloud, con creación de VM GPU,
+apagado, descarga e instalación automática del modelo:
+
+```text
+google_cloud/README.md
+google_cloud/New-PowerNZTrainingJob.ps1
+```
+
 Peso muerto:
 
 ```powershell
@@ -144,7 +154,8 @@ python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise
 - `--segmentation-model ruta.pt`: usa otro modelo de segmentacion.
 - `--velocity-chart bar`: default; grafico inferior solo de barra.
 - `--velocity-chart multi`: muestra barra + landmarks en el grafico para depurar.
-- `--body-velocity-display compact`: muestra velocidades corporales como indicadores pequeños.
+- `--body-velocity-display off`: valor por defecto; mantiene la silueta limpia.
+- `--body-velocity-display compact`: activa indicadores corporales para depuración.
 - `--load-kg 180`: muestra una carga manual exacta. Sin este flag no muestro `CARGA`.
 - `--strict-ipf-validation`: default; si la pose no permite comprobar bloqueo/profundidad, no valido automaticamente.
 - `--no-strict-ipf-validation`: modo de depuracion para clips donde quiero probar conteo solo con barra.

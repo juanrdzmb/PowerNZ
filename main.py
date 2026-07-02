@@ -51,7 +51,7 @@ from metrics import (
 )
 from pose import HybridPoseEstimator, PoseResult, YoloPoseEstimator, create_pose_estimator, refine_pose_with_mask
 from rep_review import RepDecision, decide_rep_validations
-from reporting import AnalysisReport, RepReportBuilder, write_csv_report, write_json_report
+from reporting import AnalysisReport, RepReport, RepReportBuilder, write_csv_report, write_json_report
 from render_overlay import OverlayConfig, OverlayRenderer
 from segmentation import SegmentationResult, create_segmenter, select_subject_mask
 from technique import TechniqueAssessment, TechniqueMonitor
@@ -227,6 +227,14 @@ def _bar_path_horizontal_drift_cm(
 
     xs = [point[0] for point in visible_points]
     return (max(xs) - min(xs)) * meters_per_pixel * 100.0
+
+
+def _reports_visible_at_frame(
+    reports: list[RepReport],
+    frame_index: int,
+) -> list[RepReport]:
+    """Expose a rep only once its lockout has happened in playback time."""
+    return [report for report in reports if report.lockout_frame <= frame_index]
 
 
 def _manual_load_estimate(load_kg: float | None) -> LoadEstimate | None:
@@ -484,8 +492,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--plate-box-style",
         choices=["full", "corners"],
-        default="full",
-        help="How to draw the plate anchor box. Default: full.",
+        default="corners",
+        help="How to draw the plate anchor box. Default: minimal corner brackets.",
     )
     parser.add_argument(
         "--enable-tracking",
@@ -561,8 +569,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--body-velocity-display",
         choices=["compact", "off"],
-        default="compact",
-        help="Show compact on-body joint velocity tags outside the bottom chart.",
+        default="off",
+        help="Optional on-body joint velocity tags. Default off keeps the overlay clean.",
     )
     parser.add_argument(
         "--velocity-loss-threshold",
@@ -807,6 +815,34 @@ def _plate_bar_proxy_from_anchor(
     if rect is None:
         return None
     return rect.center, float(min(0.82, anchor.plate_confidence * 0.86))
+
+
+def _fuse_hub_with_plate_vertical(
+    hub_point: Point2D | None,
+    anchor: BarAnchorState | None,
+    view_mode: str,
+) -> Point2D | None:
+    """Use the disc as a stabilising reference without moving the trace off the hub.
+
+    In a lateral view the hub and loaded plate share the same vertical axis.  The hub
+    remains the primary measurement and supplies x; a confident plate centre only
+    contributes a small y correction.  This reduces sleeve-box jitter while keeping
+    the trajectory visually attached to the bar.
+    """
+    if hub_point is None or anchor is None or view_mode != "lateral":
+        return hub_point
+    rect = anchor.display_rect or anchor.rect
+    if rect is None or anchor.plate_confidence < 0.35:
+        return hub_point
+    plate_point = rect.center
+    max_vertical_difference = max(16.0, rect.height * 0.24)
+    if abs(plate_point.y - hub_point.y) > max_vertical_difference:
+        return hub_point
+    plate_weight = min(0.32, max(0.12, anchor.plate_confidence * 0.28))
+    return Point2D(
+        x=hub_point.x,
+        y=hub_point.y * (1.0 - plate_weight) + plate_point.y * plate_weight,
+    )
 
 
 def _reset_visible_motion_history(
@@ -1499,6 +1535,10 @@ def _legacy_main() -> None:
             key: values[:history_len] for key, values in smoothed_history.items()
         }
         reps_done = bisect_right(analysis["lockout_frames"], frame_index)  # type: ignore[arg-type]
+        visible_reports = _reports_visible_at_frame(
+            analysis["rep_reports"],  # type: ignore[arg-type]
+            frame_index,
+        )
 
         return renderer.render(
             frame=frame,
@@ -1513,7 +1553,7 @@ def _legacy_main() -> None:
             velocity_frame_history=velocity_frame_history[:history_len],
             chart_max_abs=analysis["chart_max_abs"],  # type: ignore[arg-type]
             anchor_velocities=record.anchor_velocities,
-            rep_reports=analysis["rep_reports"],  # type: ignore[arg-type]
+            rep_reports=visible_reports,
             bar_anchor=record.bar_anchor,
             subject_mask=subject_mask,
             load_estimate=record.load_estimate,
@@ -1522,6 +1562,7 @@ def _legacy_main() -> None:
                 calibration.meters_per_pixel,
             ),
             debug_anchor=args.debug_anchor,
+            view_mode=record.view_mode,
         )
 
     try:
@@ -1872,6 +1913,7 @@ def main() -> None:
                 raw_point = None
             metric_source = "bar_hub"
             measurement_confidence = bar_anchor.measurement_confidence
+            raw_point = _fuse_hub_with_plate_vertical(raw_point, bar_anchor, view_mode)
             if raw_point is None and metric_enabled:
                 plate_proxy = _plate_bar_proxy_from_anchor(bar_anchor, view_mode)
                 if plate_proxy is not None:
@@ -1961,6 +2003,8 @@ def main() -> None:
             evidence: dict[int, tuple[bool | None, bool | None]] = {}
             max_horizontal = max(30.0, (calibration_diameter_px or 120.0) * 0.18)
             last_path_point: tuple[float, float] | None = None
+            previous_lift_state = "reposo"
+            trajectory_active = False
 
             for frame_index in range(frame_count):
                 record = timeline.get(frame_index)
@@ -2019,27 +2063,33 @@ def main() -> None:
                         anchor_values[value.name] = value.velocity_mps
                     report_builder.add_sample(sample)
                     point = reconstructed_sample.point
-                    if point is not None and (
-                        last_path_point is None or abs(point.x - last_path_point[0]) <= max_horizontal
-                    ):
-                        path.append((point.x, point.y))
-                        last_path_point = (point.x, point.y)
-                    elif path and path[-1] is not None:
+                    movement_started = previous_lift_state == "reposo" and sample.state in {
+                        "inicio", "tirón", "bajada"
+                    }
+                    if movement_started:
+                        path = []
+                        last_path_point = None
+                        trajectory_active = True
+                    if trajectory_active and point is not None:
+                        if last_path_point is None or abs(point.x - last_path_point[0]) <= max_horizontal:
+                            path.append((point.x, point.y))
+                            last_path_point = (point.x, point.y)
+                        elif path and path[-1] is not None:
+                            path.append(None)
+                            last_path_point = None
+                    if previous_lift_state != "reposo" and sample.state == "reposo":
+                        trajectory_active = False
+                    previous_lift_state = sample.state
+                elif path and path[-1] is not None:
+                    if trajectory_active:
                         path.append(None)
                         last_path_point = None
-                elif path and path[-1] is not None:
-                    path.append(None)
-                    last_path_point = None
 
                 for label, _ in ANCHOR_GROUPS:
                     histories[label].append(anchor_values[label])
                 histories["bar"].append(
-                    float(reconstructed_sample.velocity_mps)
-                    if (
-                        held_by_lifter
-                        and reconstructed_sample is not None
-                        and reconstructed_sample.velocity_mps is not None
-                    )
+                    float(record.sample.smoothed_velocity_mps)
+                    if held_by_lifter and record is not None and record.sample is not None
                     else float("nan")
                 )
                 if record is not None:
@@ -2083,6 +2133,10 @@ def main() -> None:
             sliced_history = {key: values[: frame_index + 1] for key, values in histories.items()}
             frame_history = analysis["velocity_frame_history"][: frame_index + 1]  # type: ignore[index]
             reps_done = bisect_right(analysis["lockout_frames"], frame_index)  # type: ignore[arg-type]
+            visible_reports = _reports_visible_at_frame(
+                analysis["accepted_reports"],  # type: ignore[arg-type]
+                frame_index,
+            )
             return renderer.render(
                 frame=frame,
                 pose=record.pose,
@@ -2097,7 +2151,7 @@ def main() -> None:
                 chart_max_abs=analysis["chart_max_abs"],  # type: ignore[arg-type]
                 video_fps=input_metadata.fps,
                 anchor_velocities=record.anchor_velocities,
-                rep_reports=analysis["accepted_reports"],  # type: ignore[arg-type]
+                rep_reports=visible_reports,
                 bar_anchor=(
                     record.visual_plate_anchor
                     if record.metric_source == "body_proxy"
@@ -2116,6 +2170,7 @@ def main() -> None:
                     else None
                 ),
                 debug_anchor=args.debug_anchor,
+                view_mode=record.view_mode,
             )
 
         def on_progress(phase: str, current: int, total: int) -> None:

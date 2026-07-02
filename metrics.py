@@ -88,6 +88,7 @@ class CompletedRep:
     end_frame: int
     displacement_m: float
     peak_velocity_mps: float
+    eccentric_start_frame: int | None = None
 
     @property
     def duration_frames(self) -> int:
@@ -192,7 +193,7 @@ class LiftStateMachine:
             self._update_bottom_position(position_m)
             self._update_reposo(frame_index, position_m, smoothed_velocity_mps)
         elif self._state == "inicio":
-            self._update_inicio(smoothed_velocity_mps)
+            self._update_inicio(position_m, smoothed_velocity_mps)
         elif self._state == "tirón":
             self._update_tiron(frame_index, position_m, smoothed_velocity_mps, lockout_ok)
         elif self._state == "bloqueo":
@@ -214,7 +215,11 @@ class LiftStateMachine:
         self._state = "inicio"
         self._rep_index += 1
         self._active_start_frame = frame_index
-        self._active_start_position_m = self._bottom_position_m or position_m
+        self._active_start_position_m = (
+            self._bottom_position_m
+            if self._bottom_position_m is not None
+            else position_m
+        )
         self._lockout_frame = None
         self._peak_velocity_mps = smoothed_velocity_mps
         self._max_displacement_m = 0.0
@@ -223,7 +228,10 @@ class LiftStateMachine:
         self._downward_before_lockout = False
         self._downward_before_lockout_frames = 0
 
-    def _update_inicio(self, smoothed_velocity_mps: float) -> None:
+    def _update_inicio(self, position_m: float, smoothed_velocity_mps: float) -> None:
+        displacement = self._current_displacement(position_m)
+        self._max_displacement_m = max(self._max_displacement_m, displacement)
+        self._peak_velocity_mps = max(self._peak_velocity_mps, smoothed_velocity_mps)
         if smoothed_velocity_mps > self._config.upward_velocity_threshold_mps:
             self._state = "tirón"
 
@@ -240,7 +248,7 @@ class LiftStateMachine:
         descent_tolerance_m = max(0.04, self._config.min_rep_displacement_m * 0.16)
         downward_loss_m = self._max_displacement_m - displacement
         if self._lockout_frame is None and smoothed_velocity_mps < self._config.downward_velocity_threshold_mps:
-            if downward_loss_m >= descent_tolerance_m:
+            if downward_loss_m >= descent_tolerance_m - 1e-9:
                 self._downward_before_lockout_frames += 1
             if self._downward_before_lockout_frames >= 2:
                 self._downward_before_lockout = True
@@ -252,7 +260,11 @@ class LiftStateMachine:
         # Reject false lockouts from a brief velocity dip early in the pull:
         # the concentric phase must have lasted at least half a min rep before we
         # trust a "still" reading as a real lockout.
-        concentric_frames = frame_index - (self._active_start_frame or frame_index)
+        concentric_frames = frame_index - (
+            self._active_start_frame
+            if self._active_start_frame is not None
+            else frame_index
+        )
         mature_pull = concentric_frames >= max(1, self._config.min_rep_frames // 2)
 
         # IPF lockout plus a mature pull: only treat the top as valid when the joints
@@ -318,8 +330,16 @@ class LiftStateMachine:
         self.completed_reps.append(
             CompletedRep(
                 rep_index=self._rep_index,
-                start_frame=self._active_start_frame or frame_index,
-                lockout_frame=self._lockout_frame or frame_index,
+                start_frame=(
+                    self._active_start_frame
+                    if self._active_start_frame is not None
+                    else frame_index
+                ),
+                lockout_frame=(
+                    self._lockout_frame
+                    if self._lockout_frame is not None
+                    else frame_index
+                ),
                 end_frame=frame_index,
                 displacement_m=self._max_displacement_m,
                 peak_velocity_mps=self._peak_velocity_mps,
@@ -384,6 +404,7 @@ class EccentricFirstStateMachine:
         self._top_position_m: float | None = None
         self._bottom_position_m: float | None = None
         self._active_start_frame: int | None = None  # ascent start (bottom)
+        self._eccentric_start_frame: int | None = None
         self._active_start_position_m: float | None = None
         self._lockout_frame: int | None = None  # ascent end (top)
         self._peak_velocity_mps = 0.0
@@ -412,7 +433,7 @@ class EccentricFirstStateMachine:
     ) -> tuple[LiftState, int, float]:
         if self._state == "reposo":
             self._update_top_position(position_m)
-            self._update_reposo(position_m, smoothed_velocity_mps)
+            self._update_reposo(frame_index, position_m, smoothed_velocity_mps)
         elif self._state == "bajada":
             self._update_bajada(frame_index, position_m, smoothed_velocity_mps, depth_ok)
         elif self._state == "tirón":
@@ -422,11 +443,17 @@ class EccentricFirstStateMachine:
 
         return self._state, self._rep_index, self._current_displacement(position_m)
 
-    def _update_reposo(self, position_m: float, smoothed_velocity_mps: float) -> None:
+    def _update_reposo(
+        self,
+        frame_index: int,
+        position_m: float,
+        smoothed_velocity_mps: float,
+    ) -> None:
         # Threshold is negative; descend once the bar moves down fast enough.
         if smoothed_velocity_mps >= self._config.downward_velocity_threshold_mps:
             return
         self._state = "bajada"
+        self._eccentric_start_frame = frame_index
         self._bottom_position_m = position_m
         self._lockout_hold_count = 0
         self._depth_reached = False
@@ -455,6 +482,7 @@ class EccentricFirstStateMachine:
         depth = top - bottom
         if depth < self._config.min_rep_displacement_m * 0.5 or not self._depth_reached:
             self._state = "reposo"  # shallow dip / not deep enough, not a real rep
+            self._eccentric_start_frame = None
             return
 
         self._rep_index += 1
@@ -481,7 +509,7 @@ class EccentricFirstStateMachine:
         descent_tolerance_m = max(0.035, self._config.min_rep_displacement_m * 0.16)
         downward_loss_m = self._max_displacement_m - displacement
         if self._lockout_frame is None and smoothed_velocity_mps < self._config.downward_velocity_threshold_mps:
-            if downward_loss_m >= descent_tolerance_m:
+            if downward_loss_m >= descent_tolerance_m - 1e-9:
                 self._downward_during_ascent_frames += 1
             if self._downward_during_ascent_frames >= 2:
                 self._downward_during_ascent = True
@@ -490,7 +518,11 @@ class EccentricFirstStateMachine:
 
         near_still = abs(smoothed_velocity_mps) <= self._config.lockout_velocity_threshold_mps
         enough_range = displacement >= self._config.min_rep_displacement_m
-        concentric_frames = frame_index - (self._active_start_frame or frame_index)
+        concentric_frames = frame_index - (
+            self._active_start_frame
+            if self._active_start_frame is not None
+            else frame_index
+        )
         mature_pull = concentric_frames >= max(1, self._config.min_rep_frames // 2)
 
         # IPF lockout at the top plus a mature ascent: squat standing erect / bench arms
@@ -534,11 +566,20 @@ class EccentricFirstStateMachine:
         self.completed_reps.append(
             CompletedRep(
                 rep_index=self._rep_index,
-                start_frame=self._active_start_frame or frame_index,
-                lockout_frame=self._lockout_frame or frame_index,
+                start_frame=(
+                    self._active_start_frame
+                    if self._active_start_frame is not None
+                    else frame_index
+                ),
+                lockout_frame=(
+                    self._lockout_frame
+                    if self._lockout_frame is not None
+                    else frame_index
+                ),
                 end_frame=frame_index,
                 displacement_m=self._max_displacement_m,
                 peak_velocity_mps=self._peak_velocity_mps,
+                eccentric_start_frame=self._eccentric_start_frame,
             )
         )
         self._reset_active_rep()
@@ -556,6 +597,7 @@ class EccentricFirstStateMachine:
 
     def _reset_active_rep(self) -> None:
         self._active_start_frame = None
+        self._eccentric_start_frame = None
         self._active_start_position_m = None
         self._lockout_frame = None
         self._peak_velocity_mps = 0.0
@@ -608,6 +650,7 @@ class BiomechanicsEngine:
         self._velocity_window: list[float] = []
         self._last_filtered_position_m: float | None = None
         self._last_smoothed_velocity_mps: float = 0.0
+        self._concentric_peak_position_m: float | None = None
 
     @property
     def completed_reps(self) -> list[CompletedRep]:
@@ -720,6 +763,9 @@ class BiomechanicsEngine:
         so unknown camera geometry produces a review rather than silently
         preventing a candidate from being reported at all.
         """
+        raw_velocity_mps = velocity_mps
+        velocity_mps = self._stabilize_reconstructed_velocity(position_m, velocity_mps)
+        previous_state = self._state_machine.state
         self._last_filtered_position_m = position_m
         self._last_smoothed_velocity_mps = velocity_mps
         self._record_velocity(velocity_mps)
@@ -730,6 +776,13 @@ class BiomechanicsEngine:
             depth_ok=True,
             lockout_ok=True,
         )
+        if state in {"inicio", "tirón"}:
+            if previous_state not in {"inicio", "tirón"} or self._concentric_peak_position_m is None:
+                self._concentric_peak_position_m = position_m
+            else:
+                self._concentric_peak_position_m = max(self._concentric_peak_position_m, position_m)
+        elif previous_state in {"inicio", "tirón"}:
+            self._concentric_peak_position_m = None
         return KinematicSample(
             frame_index=frame_index,
             time_seconds=frame_index / self._fps,
@@ -742,8 +795,32 @@ class BiomechanicsEngine:
             hub_confidence=hub_confidence,
             plate_confidence=plate_confidence,
             tracking_source=tracking_source,
-            raw_velocity_mps=velocity_mps,
+            raw_velocity_mps=raw_velocity_mps,
         )
+
+    def _stabilize_reconstructed_velocity(self, position_m: float, velocity_mps: float) -> float:
+        """Suppress tiny sign reversals while the bar is still at its highest point.
+
+        This does not hide a real descent: once position has fallen by a meaningful
+        amount the negative velocity is passed through.  It only removes the common
+        one/two-frame detector wobble that made the graph dip before lockout.
+        """
+        if abs(velocity_mps) < self._config.velocity_deadband_mps:
+            return 0.0
+        if (
+            self._state_machine.state == "bloqueo"
+            and abs(velocity_mps) <= self._config.lockout_velocity_threshold_mps
+        ):
+            return 0.0
+        if self._state_machine.state not in {"inicio", "tirón"} or velocity_mps >= 0:
+            return velocity_mps
+        peak = self._concentric_peak_position_m
+        if peak is None:
+            return velocity_mps
+        reversal_tolerance_m = max(0.015, self._config.min_rep_displacement_m * 0.06)
+        if peak - position_m < reversal_tolerance_m:
+            return 0.0
+        return velocity_mps
 
     def finalize(self, frame_index: int) -> None:
         self._state_machine.finalize(frame_index)

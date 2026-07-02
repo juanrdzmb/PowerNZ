@@ -22,6 +22,7 @@ models/*.pt
 models/*.onnx
 models/*.task
 models/exported/
+models/backups/
 !yolov8n-pose.pt
 
 # Downloadable base weights and dataset caches (not committed)

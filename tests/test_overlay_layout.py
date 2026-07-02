@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from metrics import KinematicSample
+from main import _reports_visible_at_frame
 from render_overlay import OverlayRenderer, _ascii
 from reporting import RepReport
 
@@ -29,6 +30,14 @@ def _rep(index: int) -> RepReport:
 
 def _intersects(a, b) -> bool:
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def test_fastest_table_only_receives_reps_completed_at_current_frame() -> None:
+    reps = [_rep(1), _rep(2), _rep(3)]
+
+    assert _reports_visible_at_frame(reps, 44) == []
+    assert [rep.rep_index for rep in _reports_visible_at_frame(reps, 46)] == [1]
+    assert [rep.rep_index for rep in _reports_visible_at_frame(reps, 76)] == [1, 2]
 
 
 FRAME_SIZES = [

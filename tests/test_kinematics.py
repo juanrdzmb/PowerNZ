@@ -34,3 +34,15 @@ def test_reconstructed_velocity_keeps_occlusion_as_graph_gap() -> None:
     assert result[8].observed is False
     assert result[8].valid is False
     assert result[10].valid is True
+
+
+def test_reconstruction_rejects_single_frame_false_direction_spike() -> None:
+    measurements = [_measurement(index, 400.0 - index * 4.0) for index in range(24)]
+    measurements[11] = _measurement(11, 400.0 - 11 * 4.0 + 28.0)
+
+    result = reconstruct_bar_kinematics(measurements, fps=30.0)
+
+    assert result[11].observed is False
+    reliable = [sample.velocity_mps for sample in result[7:16] if sample.valid]
+    assert reliable
+    assert min(reliable) >= -0.02

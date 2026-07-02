@@ -9,6 +9,7 @@ from detect_objects import Detection
 from pose import PoseKeypoint, PoseResult
 
 LiftStateName = Literal["reposo", "inicio", "tirón", "bloqueo", "bajada"]
+BAR_DETECTION_LABELS = {"barbell", "bar_hub", "bar_sleeve"}
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,7 @@ class TechniqueMonitor:
             if keypoint.visibility >= 0.35
         }
         torso_angle = _torso_angle_degrees(keypoints)
-        barbell = next((detection for detection in detections if detection.label == "barbell"), None)
+        barbell = _bar_detection(detections)
 
         if self._active_rep_index != rep_index:
             self._active_rep_index = rep_index
@@ -423,7 +424,7 @@ def _bar_to_midfoot_distance_m(
     detections: list[Detection],
     calibration: SpatialCalibration,
 ) -> float | None:
-    barbell = next((detection for detection in detections if detection.label == "barbell"), None)
+    barbell = _bar_detection(detections)
     if barbell is None:
         return None
 
@@ -439,6 +440,16 @@ def _bar_to_midfoot_distance_m(
     midfoot_x = ankle.x if toe is None else (ankle.x + toe.x) / 2.0
     bar_x, _ = barbell.center
     return abs(bar_x - midfoot_x) * calibration.meters_per_pixel
+
+
+def _bar_detection(detections: list[Detection]) -> Detection | None:
+    """Return the best bar-axis detection produced by either model vocabulary."""
+    candidates = [
+        detection
+        for detection in detections
+        if detection.label.lower() in BAR_DETECTION_LABELS
+    ]
+    return max(candidates, key=lambda detection: detection.confidence, default=None)
 
 
 def _midpoint(

@@ -1,0 +1,2 @@
+# Startup scripts are sent directly to Linux VMs and must keep Unix line endings.
+google_cloud/startup_train.sh text eol=lf

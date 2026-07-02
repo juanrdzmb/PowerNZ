@@ -111,3 +111,43 @@ def test_biomechanics_engine_rejects_unreasonable_rep_displacement() -> None:
     validations = engine.validate_reps()
 
     assert validations[0].accepted is False
+
+
+def test_reconstructed_engine_suppresses_tiny_false_descent_before_lockout() -> None:
+    config = BiomechanicsConfig(
+        upward_velocity_threshold_mps=0.1,
+        downward_velocity_threshold_mps=-0.1,
+        min_rep_displacement_m=0.2,
+        min_rep_frames=4,
+    )
+    engine = BiomechanicsEngine(fps=30.0, config=config)
+    engine.update_reconstructed(0, 0.00, 0.00)
+    engine.update_reconstructed(1, 0.05, 0.20)
+    engine.update_reconstructed(2, 0.16, 0.28)
+    wobble = engine.update_reconstructed(3, 0.155, -0.12)
+
+    assert wobble.smoothed_velocity_mps == 0.0
+    assert wobble.raw_velocity_mps == -0.12
+    assert wobble.state in {"inicio", "tirón"}
+
+
+def test_reconstructed_engine_holds_zero_velocity_during_lockout_jitter() -> None:
+    config = BiomechanicsConfig(
+        upward_velocity_threshold_mps=0.1,
+        downward_velocity_threshold_mps=-0.1,
+        lockout_velocity_threshold_mps=0.2,
+        min_rep_displacement_m=0.2,
+        min_rep_frames=2,
+        lockout_hold_frames=1,
+    )
+    engine = BiomechanicsEngine(fps=30.0, config=config)
+    engine.update_reconstructed(0, 0.00, 0.00)
+    engine.update_reconstructed(1, 0.08, 0.25)
+    engine.update_reconstructed(2, 0.25, 0.30)
+    lockout = engine.update_reconstructed(3, 0.25, 0.00)
+    jitter = engine.update_reconstructed(4, 0.247, -0.13)
+
+    assert lockout.state == "bloqueo"
+    assert jitter.state == "bloqueo"
+    assert jitter.smoothed_velocity_mps == 0.0
+    assert jitter.raw_velocity_mps == -0.13

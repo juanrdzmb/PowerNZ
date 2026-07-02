@@ -14,6 +14,7 @@ from main import (
     _body_bar_proxy_from_pose,
     _compute_ipf_flags_with_pose_fallback,
     _filter_detections_near_bar,
+    _fuse_hub_with_plate_vertical,
     _manual_load_estimate,
     _estimate_view_mode,
     _plate_bar_proxy_from_anchor,
@@ -91,6 +92,30 @@ def test_single_anchor_sample_comes_from_hub_point_only_when_reliable() -> None:
     assert _sample_point_from_single_anchor(reliable) == reliable.point
     assert _sample_point_from_single_anchor(plate_only) is None
     assert _sample_point_from_single_anchor(pose_seed) is None
+
+
+def test_lateral_disc_stabilises_hub_y_without_moving_hub_x() -> None:
+    hub = Point2D(150.0, 205.0)
+    anchor = BarAnchorState(
+        point=hub,
+        rect=AnchorRect(80.0, 130.0, 220.0, 270.0),
+        confidence=0.9,
+        missing_frames=0,
+        locked=True,
+        source="detection",
+        plate_confidence=0.9,
+        hub_confidence=0.8,
+        measurement_point=hub,
+        measurement_confidence=0.8,
+        measurable=True,
+    )
+
+    fused = _fuse_hub_with_plate_vertical(hub, anchor, "lateral")
+
+    assert fused is not None
+    assert fused.x == hub.x
+    assert 200.0 < fused.y < hub.y
+    assert _fuse_hub_with_plate_vertical(hub, anchor, "frontal") == hub
 
 
 def test_visible_motion_history_starts_once_and_accumulates_series() -> None:

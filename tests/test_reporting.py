@@ -22,6 +22,33 @@ def test_rep_report_builder_calculates_rep_values() -> None:
     assert report.velocity_loss_warning is False
 
 
+def test_eccentric_first_report_measures_descent_before_concentric() -> None:
+    builder = RepReportBuilder(fps=10.0)
+    for frame in range(2, 11):
+        builder.add_sample(
+            KinematicSample(
+                frame_index=frame,
+                time_seconds=frame / 10.0,
+                position_m=0.0,
+                velocity_mps=0.3,
+                smoothed_velocity_mps=0.3,
+                state="tirón",
+                rep_index=1,
+                rep_displacement_m=0.3,
+            )
+        )
+    rep = CompletedRep(
+        1, start_frame=6, lockout_frame=10, end_frame=10,
+        displacement_m=0.3, peak_velocity_mps=0.4, eccentric_start_frame=2,
+    )
+
+    report = builder.build_rep_report(rep)
+
+    assert report.eccentric_seconds == 0.4
+    assert report.concentric_seconds == 0.4
+    assert report.duration_seconds == 0.8
+
+
 def test_rep_report_builder_flags_velocity_loss() -> None:
     builder = RepReportBuilder(fps=10.0, velocity_loss_threshold_percent=20.0)
     samples = [

@@ -88,17 +88,30 @@ class RepReportBuilder:
             else 0.0
         )
 
-        duration_seconds = max(0.0, (rep.end_frame - rep.start_frame) / self._fps)
+        movement_start_frame = (
+            rep.eccentric_start_frame
+            if rep.eccentric_start_frame is not None
+            else rep.start_frame
+        )
+        duration_seconds = max(0.0, (rep.end_frame - movement_start_frame) / self._fps)
         concentric_seconds = max(0.0, (rep.lockout_frame - rep.start_frame) / self._fps)
-        eccentric_seconds = max(0.0, (rep.end_frame - rep.lockout_frame) / self._fps)
+        if rep.eccentric_start_frame is not None:
+            eccentric_seconds = max(0.0, (rep.start_frame - rep.eccentric_start_frame) / self._fps)
+        else:
+            eccentric_seconds = max(0.0, (rep.end_frame - rep.lockout_frame) / self._fps)
 
+        accepted_history = [
+            report.mean_concentric_velocity_mps
+            for report in self._built_reports
+            if report.validation_status == "accepted"
+        ]
         best_velocity = max(
-            [report.mean_concentric_velocity_mps for report in self._built_reports] + [mean_concentric_velocity],
+            accepted_history + [mean_concentric_velocity],
             default=mean_concentric_velocity,
         )
         previous_velocity = (
-            self._built_reports[-1].mean_concentric_velocity_mps
-            if self._built_reports
+            accepted_history[-1]
+            if accepted_history
             else mean_concentric_velocity
         )
         loss_from_best = _velocity_loss_percent(mean_concentric_velocity, best_velocity)
