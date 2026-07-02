@@ -5,6 +5,7 @@ Pillow>=10.0
 
 # Pose, detection and optional segmentation backends
 ultralytics>=8.0
+lap>=0.5.12
 mediapipe>=0.10
 
 # Mobile-friendly MP4 export

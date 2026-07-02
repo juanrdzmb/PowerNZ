@@ -267,3 +267,21 @@ def test_overlay_labels_body_proxy_velocity_as_estimated() -> None:
 
     assert "VELOCIDAD CORPORAL*" in drawn
     assert "* MUÑECAS" in drawn
+
+
+def test_overlay_labels_plate_center_velocity_as_bar_from_disc() -> None:
+    renderer = OverlayRenderer()
+    drawn: list[str] = []
+    renderer._text = lambda _frame, text, *_args, **_kwargs: drawn.append(text)  # type: ignore[method-assign]
+    renderer._rounded_panel = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    renderer._draw_multi_velocity_chart(
+        frame=np.zeros((720, 720, 3), dtype=np.uint8),
+        anchor_velocity_history={"bar": [0.0, 0.20, 0.10]},
+        rep_reports=[],
+        frame_history=[0, 1, 2],
+        metric_source="plate_center",
+    )
+
+    assert "VELOCIDAD BARRA · CENTRO DE DISCO" in drawn
+    assert "VELOCIDAD CORPORAL*" not in drawn

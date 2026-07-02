@@ -135,6 +135,7 @@ python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise
 - `--calibration-mode auto|manual`: automática por defecto; en manual usa `--plate-diameter-px`.
 - `--exercise deadlift|squat|bench`: cambia la maquina de estados y las reglas tecnicas.
 - `--output-format portrait-720`: default; exporta 9:16 `720x1280` sin recortar.
+- `--view-mode auto|lateral|diagonal|frontal`: detecta el ángulo o lo fija manualmente. En lateral, el centro del disco mantiene la trayectoria de la barra si el hub queda oculto.
 - `--output-format source`: mantiene la geometria original, util para depurar.
 - `--object-model ruta.pt`: usa otro detector `plate/bar_hub`.
 - `--enable-plate-heuristic`: activa el respaldo antiguo por color.
@@ -156,17 +157,17 @@ python main.py --input video_prueba.mp4 --output outputs\analisis.mp4 --exercise
 Proceso el video en dos pasadas.
 
 1. En la primera pasada analizo pose, máscara y barra; la máscara se guarda temporalmente y no se vuelve a inferir.
-2. Reconstruyo una sola trayectoria de `bar_hub`, rechazo saltos y calculo velocidad centrada sin latencia; después decido las reps y revisiones técnicas.
+2. Reconstruyo una sola trayectoria del eje de barra (`bar_hub`, o centro de disco fiable en lateral), rechazo saltos y calculo velocidad centrada sin latencia; después decido las reps y revisiones técnicas.
 3. En la segunda pasada dibujo el overlay final con contador `hecho/total`, trayectoria, máscara cacheada y gráfica sincronizada.
 
-El punto metrico de la barra es `bar_hub`. Si veo el plato pero no veo un hub fiable, dibujo la caja del plato para que se entienda el seguimiento, pero no invento velocidad ni trayectoria desde la pose.
+El punto metrico principal es `bar_hub`. En lateral, el centro de un disco fiable comparte el eje vertical de la barra y mantiene la medición si el hub se oculta. Si también se pierde el disco, dejo un corte: no traslado la trayectoria a las muñecas.
 
 ## Validacion Visual
 
 Antes de considerar una version lista reviso tres cosas:
 
 - El rectangulo `Plate` abraza el disco detectado y lo sigue sin saltar a discos del suelo.
-- La caja `Bar` aparece solo cuando el `bar_hub` es fiable.
+- La caja `Bar` aparece con un `bar_hub` fiable o con el disco usado como eje lateral.
 - La mascara y el esqueleto pertenecen al atleta que sostiene la barra.
 
 Comando recomendado de smoke:

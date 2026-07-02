@@ -22,6 +22,12 @@ PROFILES = {
     "Máxima precisión": "precision",
     "Máxima velocidad": "fast",
 }
+VIEW_MODES = {
+    "Automático": "auto",
+    "Lateral (perfil)": "lateral",
+    "Diagonal": "diagonal",
+    "Frontal": "frontal",
+}
 PROGRESS_RE = re.compile(r"^PROGRESS\s+(\w+)\s+(\d+)\s+(\d+)")
 
 
@@ -36,6 +42,7 @@ class PowerNZLauncher(tk.Tk):
         self.output_path = tk.StringVar()
         self.exercise_label = tk.StringVar(value="Peso muerto")
         self.profile_label = tk.StringVar(value="Equilibrado")
+        self.view_mode_label = tk.StringVar(value="Automático")
         self.output_format = tk.StringVar(value="portrait-720")
         self.calibration_mode = tk.StringVar(value="auto")
         self.plate_diameter = tk.StringVar(value="")
@@ -106,10 +113,19 @@ class PowerNZLauncher(tk.Tk):
             width=18,
         )
         calibration.grid(row=0, column=1, sticky="w")
-        ttk.Label(self.advanced_frame, text="Diámetro del disco (px)").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(self.advanced_frame, text="Ángulo de cámara").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        view_mode = ttk.Combobox(
+            self.advanced_frame,
+            textvariable=self.view_mode_label,
+            values=tuple(VIEW_MODES),
+            state="readonly",
+            width=18,
+        )
+        view_mode.grid(row=1, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(self.advanced_frame, text="Diámetro del disco (px)").grid(row=2, column=0, sticky="w", pady=(8, 0))
         diameter = ttk.Entry(self.advanced_frame, textvariable=self.plate_diameter, width=18)
-        diameter.grid(row=1, column=1, sticky="w", pady=(8, 0))
-        ttk.Label(self.advanced_frame, text="Formato de salida").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        diameter.grid(row=2, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(self.advanced_frame, text="Formato de salida").grid(row=3, column=0, sticky="w", pady=(8, 0))
         output_format = ttk.Combobox(
             self.advanced_frame,
             textvariable=self.output_format,
@@ -117,8 +133,8 @@ class PowerNZLauncher(tk.Tk):
             state="readonly",
             width=18,
         )
-        output_format.grid(row=2, column=1, sticky="w", pady=(8, 0))
-        self._controls.extend([calibration, diameter, output_format])
+        output_format.grid(row=3, column=1, sticky="w", pady=(8, 0))
+        self._controls.extend([calibration, view_mode, diameter, output_format])
 
         output_frame = ttk.LabelFrame(root, text="Resultado", padding=12)
         output_frame.grid(row=6, column=0, sticky="ew", pady=(12, 0))
@@ -278,6 +294,7 @@ class PowerNZLauncher(tk.Tk):
             "--exercise", EXERCISES[self.exercise_label.get()],
             "--profile", PROFILES[self.profile_label.get()],
             "--pose-backend", "auto",
+            "--view-mode", VIEW_MODES[self.view_mode_label.get()],
             "--calibration-mode", self.calibration_mode.get(),
             "--output-format", self.output_format.get(),
         ]

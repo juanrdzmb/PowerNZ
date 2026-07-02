@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bar_anchor import BarAnchorState, BarAnchorTracker, Point2D
+from bar_anchor import AnchorRect, BarAnchorState, BarAnchorTracker, Point2D
 from anchor_metrics import ANCHOR_GROUPS, AnchorVelocity
 from detect_objects import Detection
 from metrics import KinematicSample
@@ -15,9 +15,12 @@ from main import (
     _compute_ipf_flags_with_pose_fallback,
     _filter_detections_near_bar,
     _manual_load_estimate,
+    _estimate_view_mode,
+    _plate_bar_proxy_from_anchor,
     _plate_heuristic_enabled,
     _plate_detections_for_visual_anchor,
     _reset_visible_motion_history,
+    _resolve_view_mode,
     _sample_point_from_single_anchor,
     _strict_ipf_gate,
 )
@@ -276,3 +279,110 @@ def test_visual_plate_anchor_prefers_outer_disc_over_torso_false_positive() -> N
     )
 
     assert chosen == [outer_disc]
+
+
+def test_view_mode_estimation_recognizes_lateral_and_manual_override() -> None:
+    lateral_pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_shoulder", 300.0, 200.0, 0.9),
+            PoseKeypoint("right_shoulder", 312.0, 202.0, 0.9),
+            PoseKeypoint("left_hip", 304.0, 410.0, 0.9),
+            PoseKeypoint("right_hip", 314.0, 411.0, 0.9),
+            PoseKeypoint("left_ankle", 305.0, 760.0, 0.9),
+            PoseKeypoint("right_ankle", 316.0, 758.0, 0.9),
+        ],
+        backend="yolo",
+        detected=True,
+    )
+
+    assert _estimate_view_mode(lateral_pose) == "lateral"
+    assert _resolve_view_mode("auto", lateral_pose) == "lateral"
+    assert _resolve_view_mode("frontal", lateral_pose) == "frontal"
+
+
+def test_missing_pose_defaults_auto_view_to_diagonal() -> None:
+    missing = PoseResult(keypoints=[], backend="yolo", detected=False)
+
+    assert _estimate_view_mode(missing) == "unknown"
+    assert _resolve_view_mode("auto", missing) == "diagonal"
+
+
+def test_lateral_plate_selector_prefers_bar_height_over_far_background_disc() -> None:
+    pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_shoulder", 355.0, 320.0, 0.9),
+            PoseKeypoint("right_shoulder", 370.0, 322.0, 0.9),
+            PoseKeypoint("left_hip", 360.0, 540.0, 0.9),
+            PoseKeypoint("right_hip", 372.0, 541.0, 0.9),
+            PoseKeypoint("left_wrist", 340.0, 650.0, 0.9),
+            PoseKeypoint("right_wrist", 356.0, 648.0, 0.9),
+            PoseKeypoint("left_ankle", 360.0, 950.0, 0.9),
+            PoseKeypoint("right_ankle", 374.0, 948.0, 0.9),
+        ],
+        backend="yolo",
+        detected=True,
+    )
+    lifting_plate = Detection("plate", 0.82, 90.0, 570.0, 230.0, 720.0)
+    floor_plate = Detection("plate", 0.97, 8.0, 920.0, 170.0, 1090.0)
+
+    chosen = _plate_detections_for_visual_anchor(
+        [lifting_plate, floor_plate], pose, (1280, 720, 3), "lateral"
+    )
+
+    assert chosen == [lifting_plate]
+
+
+def test_lateral_filter_allows_outer_plate_but_rejects_floor_plate() -> None:
+    pose = PoseResult(
+        keypoints=[
+            PoseKeypoint("left_wrist", 350.0, 620.0, 0.9),
+            PoseKeypoint("right_wrist", 365.0, 622.0, 0.9),
+        ],
+        backend="yolo",
+        detected=True,
+    )
+    outer_plate = Detection("plate", 0.88, 45.0, 545.0, 185.0, 700.0)
+    hub = Detection("bar_hub", 0.78, 175.0, 605.0, 205.0, 635.0)
+    floor_plate = Detection("plate", 0.96, 520.0, 930.0, 680.0, 1090.0)
+
+    filtered = _filter_detections_near_bar(
+        [outer_plate, hub, floor_plate], pose, (1280, 720, 3), "lateral"
+    )
+
+    assert outer_plate in filtered
+    assert hub in filtered
+    assert floor_plate not in filtered
+
+
+def test_plate_center_is_bar_proxy_only_for_fresh_lateral_detection() -> None:
+    rect = AnchorRect(80.0, 520.0, 220.0, 680.0)
+    anchor = BarAnchorState(
+        point=Point2D(150.0, 600.0),
+        rect=rect,
+        confidence=0.84,
+        missing_frames=0,
+        locked=True,
+        source="detection",
+        plate_confidence=0.84,
+        display_rect=rect,
+    )
+
+    proxy = _plate_bar_proxy_from_anchor(anchor, "lateral")
+
+    assert proxy is not None
+    point, confidence = proxy
+    assert point == Point2D(150.0, 600.0)
+    assert confidence == pytest.approx(0.84 * 0.86)
+    assert _plate_bar_proxy_from_anchor(anchor, "diagonal") is None
+
+    held = BarAnchorState(
+        point=anchor.point,
+        rect=rect,
+        confidence=0.7,
+        missing_frames=1,
+        locked=True,
+        source="hold",
+        plate_confidence=0.84,
+        display_rect=rect,
+    )
+    assert _plate_bar_proxy_from_anchor(held, "lateral") is None

@@ -24,9 +24,9 @@ El flujo actual es de dos pasadas.
 3. Segmento el atleta con `powerai_athlete_seg.pt` si existe y selecciono la máscara más coherente con los landmarks. Esa máscara no solo se dibuja: también corrige o baja la confianza de puntos fuera del cuerpo.
 4. Detecto barra/discos con `powerai_bar_detector.pt`, clases `plate` y `bar_hub`.
 5. Filtro detecciones de barra cerca de las munecas para evitar discos del suelo o del fondo.
-6. El tracker de barra estabiliza el plato visible y exige `bar_hub` fiable para medir.
+6. El tracker de barra estabiliza el plato visible y mide desde `bar_hub`; en lateral admite el centro de un disco fiable como eje de respaldo.
 7. Convierto pixeles a metros usando el diametro del disco olimpico: `0.45 m`.
-8. Reconstruyo la trayectoria de `bar_hub` al terminar la primera pasada: filtro saltos, mantengo huecos reales y calculo velocidad centrada sin desfase.
+8. Reconstruyo la trayectoria del eje de barra al terminar la primera pasada: filtro saltos, mantengo huecos reales y calculo velocidad centrada sin desfase.
 9. Reproduzco las reglas del ejercicio y marco `review` si la evidencia de cámara/pose no es suficiente.
 10. En la segunda pasada dibujo el overlay con escala de gráfico estable, total conocido y máscaras cacheadas de la primera pasada.
 
@@ -52,11 +52,11 @@ Esto hace que los calculos de rodilla, cadera y codo sean menos sensibles a pers
 
 ## Tracking De Barra
 
-El punto metrico es `bar_hub`, no la muneca ni el centro aproximado del plato.
+El punto metrico principal es `bar_hub`. En vista lateral, si el hub queda oculto pero el detector mantiene un disco fiable, el centro de ese disco se usa como eje de la barra; disco y barra comparten altura y así la trayectoria no salta a las muñecas del atleta. En vistas diagonal o frontal se conserva el respaldo corporal cuando no hay otro punto medible.
 
-El plato se puede dibujar aunque el hub no sea medible. Eso ayuda a revisar si el detector esta viendo bien el disco. Pero velocidad, trayectoria y contador solo avanzan cuando el hub pasa la compuerta de medicion.
+El plato se puede dibujar aunque no sea medible. En lateral, un disco detectado con confianza suficiente puede pasar la compuerta como `plate_center`; en los demás ángulos se exige el hub o se marca explícitamente el respaldo corporal. Esto permite revisar qué fuente produjo la trayectoria sin confundir una caja visual con una medición fiable.
 
-La trayectoria se pinta fina y casi vertical. Si hay perdida de `bar_hub`, salto horizontal grande o cambio de lado, guardo un corte explicito y el renderer no une esos puntos.
+La trayectoria se pinta fina y casi vertical. Si se pierden tanto el hub como el disco lateral fiable, hay un salto horizontal grande o cambia el lado detectado, guardo un corte explícito y el renderer no une esos puntos.
 
 ## Conteo De Repeticiones
 
@@ -93,7 +93,7 @@ La pantalla final queda deliberadamente simple:
 - silueta clara del atleta;
 - esqueleto biomecanico;
 - caja `Plate`;
-- caja `Bar` si hay hub fiable;
+- caja `Bar` si hay hub fiable o un disco lateral usado como eje;
 - trayectoria fina de barra;
 - panel de velocidad/ROM/reps/drift;
 - grafico inferior de velocidad de barra;
@@ -115,7 +115,7 @@ Para depurar puedo usar:
 
 - La validez IPF es una ayuda tecnica, no un veredicto oficial.
 - Un mal angulo de camara puede ocultar articulaciones.
-- Si el hub no se detecta, no hay velocidad fiable.
+- Si no se detecta ni hub ni un disco lateral fiable, no hay velocidad de barra fiable.
 - Si el modelo de barra no generaliza a un gimnasio o disco nuevo, toca reentrenar con mas datos.
 
 ## Archivos Clave

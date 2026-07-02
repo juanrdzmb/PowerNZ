@@ -1121,6 +1121,8 @@ class OverlayRenderer:
 
         if metric_source == "body_proxy":
             metric_label = "VEL. CUERPO*" if compact else "VELOCIDAD CORPORAL*"
+        elif metric_source == "plate_center":
+            metric_label = "VEL. BARRA · DISCO" if compact else "VELOCIDAD BARRA · CENTRO DE DISCO"
         else:
             metric_label = "VELOCIDAD BARRA"
         self._text(

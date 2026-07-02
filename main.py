@@ -83,6 +83,7 @@ class FrameRecord:
     anchor_velocities: list[AnchorVelocity] = field(default_factory=list)
     bar_path: list[BarPathPoint] = field(default_factory=list)
     metric_source: str = "bar_hub"
+    view_mode: str = "diagonal"
     mask_cached: bool = False
 
 
@@ -518,9 +519,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--view-mode",
-        choices=["auto", "lateral", "diagonal"],
+        choices=["auto", "lateral", "diagonal", "frontal"],
         default="auto",
-        help="Deprecated/no-op. Kept for compatibility; the best visible plate anchor is always used.",
+        help=(
+            "Camera angle. Auto estimates it from pose; lateral uses the visible plate centre "
+            "as a bar-axis fallback when the trained hub is occluded."
+        ),
     )
     parser.add_argument(
         "--athlete-lock",
@@ -656,10 +660,59 @@ def _bar_height_hint_from_pose(pose: PoseResult | None) -> Point2D | None:
     return Point2D(center_x, center_y)
 
 
+def _estimate_view_mode(pose: PoseResult | None) -> str:
+    """Estimate camera geometry from the apparent width of paired body landmarks."""
+    if pose is None or not pose.detected or not pose.keypoints:
+        return "unknown"
+
+    visible = {keypoint.name: keypoint for keypoint in pose.keypoints if keypoint.visibility >= 0.35}
+    widths: list[float] = []
+    for left_name, right_name in (
+        ("left_shoulder", "right_shoulder"),
+        ("left_hip", "right_hip"),
+        ("left_ankle", "right_ankle"),
+    ):
+        left = visible.get(left_name)
+        right = visible.get(right_name)
+        if left is not None and right is not None:
+            widths.append(abs(left.x - right.x))
+    if not widths:
+        return "unknown"
+
+    y_values = [keypoint.y for keypoint in visible.values()]
+    body_height = max(y_values) - min(y_values) if len(y_values) >= 2 else 0.0
+    average_width = sum(widths) / len(widths)
+    if body_height <= 1.0:
+        return "lateral" if average_width < 45.0 else "diagonal"
+
+    width_ratio = average_width / body_height
+    if width_ratio < 0.16:
+        return "lateral"
+    if width_ratio < 0.34:
+        return "diagonal"
+    return "frontal"
+
+
+def _resolve_view_mode(
+    requested: str,
+    pose: PoseResult | None,
+    fallback_pose: PoseResult | None = None,
+) -> str:
+    if requested != "auto":
+        return requested
+    estimated = _estimate_view_mode(pose)
+    if estimated == "unknown" and fallback_pose is not None:
+        fallback = _estimate_view_mode(fallback_pose)
+        if fallback != "unknown":
+            return fallback
+    return "diagonal" if estimated == "unknown" else estimated
+
+
 def _bar_point_is_plausibly_held(
     point: Point2D | None,
     pose: PoseResult | None,
     frame_shape: tuple[int, ...],
+    view_mode: str = "diagonal",
 ) -> bool:
     """Reject a visually plausible detector point when it is nowhere near the lifter.
 
@@ -689,8 +742,15 @@ def _bar_point_is_plausibly_held(
 
     # On a full-height vertical phone video the outside plate can sit a long way to
     # the side of the hands, but it cannot plausibly be hundreds of pixels above them.
-    max_horizontal = max(110.0, frame_width * 0.38)
-    max_vertical = max(95.0, frame_height * 0.22)
+    if view_mode == "lateral":
+        max_horizontal = max(110.0, frame_width * 0.48)
+        max_vertical = max(80.0, frame_height * 0.16)
+    elif view_mode == "frontal":
+        max_horizontal = max(110.0, frame_width * 0.44)
+        max_vertical = max(95.0, frame_height * 0.22)
+    else:
+        max_horizontal = max(110.0, frame_width * 0.40)
+        max_vertical = max(90.0, frame_height * 0.20)
     return (
         abs(point.x - wrist_x) <= max_horizontal
         and abs(point.y - wrist_y) <= max_vertical
@@ -727,6 +787,28 @@ def _body_bar_proxy_from_pose(pose: PoseResult | None) -> tuple[Point2D, float] 
     return point, float(confidence)
 
 
+def _plate_bar_proxy_from_anchor(
+    anchor: BarAnchorState | None,
+    view_mode: str,
+) -> tuple[Point2D, float] | None:
+    """Use the detected disc centre as the bar axis only in a side view.
+
+    A plate centre and the bar hub share the same vertical motion in a lateral view.
+    This is more faithful than moving the trace onto the athlete's wrists when the hub
+    is briefly hidden by the loaded disc.
+    """
+    if view_mode != "lateral" or anchor is None:
+        return None
+    if anchor.source != "detection" or anchor.missing_frames > 0:
+        return None
+    if anchor.plate_confidence < 0.35:
+        return None
+    rect = anchor.display_rect or anchor.rect
+    if rect is None:
+        return None
+    return rect.center, float(min(0.82, anchor.plate_confidence * 0.86))
+
+
 def _reset_visible_motion_history(
     bar_path: list[BarPathPoint],
     anchor_velocity_history: dict[str, list[float]],
@@ -761,6 +843,7 @@ def _filter_detections_near_bar(
     detections: list[Detection],
     pose: PoseResult | None,
     frame_shape: tuple[int, ...],
+    view_mode: str = "diagonal",
 ) -> list[Detection]:
     """Keep only plate/bar detections plausibly on the bar (a band around the wrists),
     rejecting plates on the floor or in the background. This is the strongest runtime
@@ -784,8 +867,15 @@ def _filter_detections_near_bar(
     wrist_span = (max(wrist_xs) - min(wrist_xs)) if len(wrist_xs) > 1 else 0.0
 
     height, width = frame_shape[:2]
-    y_margin = max(48.0, min(height * 0.13, 170.0))
-    x_margin = max(width * 0.24, wrist_span * 1.05 + width * 0.08)
+    if view_mode == "lateral":
+        y_margin = max(42.0, min(height * 0.10, 130.0))
+        x_margin = max(width * 0.38, wrist_span * 1.10 + width * 0.12)
+    elif view_mode == "frontal":
+        y_margin = max(48.0, min(height * 0.14, 175.0))
+        x_margin = max(width * 0.43, wrist_span * 1.15 + width * 0.10)
+    else:
+        y_margin = max(48.0, min(height * 0.13, 170.0))
+        x_margin = max(width * 0.30, wrist_span * 1.05 + width * 0.08)
     wrist_band_plates = []
     for detection in detections:
         if detection.label != "plate":
@@ -824,6 +914,7 @@ def _plate_detections_for_visual_anchor(
     detections: list[Detection],
     pose: PoseResult | None,
     frame_shape: tuple[int, ...],
+    view_mode: str = "diagonal",
 ) -> list[Detection]:
     """Choose one real-looking outer plate for the visual rectangle.
 
@@ -856,6 +947,24 @@ def _plate_detections_for_visual_anchor(
     body_center_y = (body_y1 + body_y2) / 2.0
     body_width = max(40.0, body_x2 - body_x1)
     body_height = max(80.0, body_y2 - body_y1)
+
+    wrists = [
+        keypoint
+        for keypoint in pose.keypoints
+        if keypoint.name in {"left_wrist", "right_wrist"} and keypoint.visibility >= 0.35
+    ]
+    if view_mode == "lateral" and wrists:
+        wrist_x = sum(keypoint.x for keypoint in wrists) / len(wrists)
+        wrist_y = sum(keypoint.y for keypoint in wrists) / len(wrists)
+
+        def lateral_score(detection: Detection) -> float:
+            center_x, center_y = detection.center
+            vertical_alignment = max(0.0, 1.0 - abs(center_y - wrist_y) / max(48.0, height * 0.16))
+            horizontal_alignment = max(0.10, 1.0 - abs(center_x - wrist_x) / max(80.0, width * 0.55))
+            size = min(1.0, max(detection.width, detection.height) / max(1.0, min(width, height) * 0.20))
+            return detection.confidence * (0.75 + 1.70 * vertical_alignment + 0.25 * horizontal_alignment) + size * 0.40
+
+        return [max(plates, key=lateral_score)]
 
     def score(detection: Detection) -> float:
         center_x, center_y = detection.center
@@ -1750,19 +1859,34 @@ def main() -> None:
             if not small_detections and fallback_object_detector is not None:
                 small_detections = fallback_object_detector.detect(inference_frame)
             raw_detections = inference_transform.detections_to_output(small_detections)
+            view_mode = _resolve_view_mode(args.view_mode, pose, raw_pose)
             visual_plate_anchor = visual_plate_tracker.update(
                 frame,
-                _plate_detections_for_visual_anchor(raw_detections, pose, frame.shape),
+                _plate_detections_for_visual_anchor(raw_detections, pose, frame.shape, view_mode),
             )
-            detections = _filter_detections_near_bar(raw_detections, pose, frame.shape)
+            detections = _filter_detections_near_bar(raw_detections, pose, frame.shape, view_mode)
             bar_anchor_tracker.set_pose_hint(_bar_height_hint_from_pose(pose))
             bar_anchor = bar_anchor_tracker.update(frame, detections)
             raw_point = measurement_gate.point_for_measurement(bar_anchor) if metric_enabled else None
-            if raw_point is not None and not _bar_point_is_plausibly_held(raw_point, pose, frame.shape):
+            if raw_point is not None and not _bar_point_is_plausibly_held(raw_point, pose, frame.shape, view_mode):
                 raw_point = None
             metric_source = "bar_hub"
             measurement_confidence = bar_anchor.measurement_confidence
-            if raw_point is None and metric_enabled and bar_anchor.rect is not None:
+            if raw_point is None and metric_enabled:
+                plate_proxy = _plate_bar_proxy_from_anchor(bar_anchor, view_mode)
+                if plate_proxy is not None:
+                    raw_point, measurement_confidence = plate_proxy
+                    metric_source = "plate_center"
+            # In profile, losing both hub and plate must create a real gap. Moving
+            # the trace to the hands is visibly wrong because the loaded disc sits
+            # on a different image column. Diagonal/frontal views may still use the
+            # explicitly labelled body fallback.
+            if (
+                raw_point is None
+                and metric_enabled
+                and bar_anchor.rect is not None
+                and view_mode != "lateral"
+            ):
                 body_proxy = _body_bar_proxy_from_pose(pose)
                 if body_proxy is not None:
                     raw_point, measurement_confidence = body_proxy
@@ -1778,19 +1902,24 @@ def main() -> None:
             )
             stats["frames"] += 1
             stats["tracked_frames"] += int(measurement.measurable)
-            stats["hub_reliable_frames"] += int(measurement.measurable)
+            stats["hub_reliable_frames"] += int(measurement.measurable and metric_source == "bar_hub")
             stats["object_frames"] += int(bar_anchor.rect is not None and bar_anchor.source != "lost")
             record = FrameRecord(
                 pose=pose,
                 raw_pose=raw_pose,
                 detections=detections,
-                bar_anchor=bar_anchor if (args.show_unmeasured_anchor or bar_anchor.measurable) else None,
+                bar_anchor=(
+                    bar_anchor
+                    if (args.show_unmeasured_anchor or bar_anchor.measurable or metric_source == "plate_center")
+                    else None
+                ),
                 visual_plate_anchor=visual_plate_anchor,
                 load_estimate=manual_load_estimate,
                 measurement=measurement,
                 depth_ok=depth_ok,
                 lockout_ok=lockout_ok,
                 metric_source=metric_source,
+                view_mode=view_mode,
                 mask_cached=athlete_mask is not None,
             )
             timeline[frame_index] = record
@@ -1843,7 +1972,8 @@ def main() -> None:
                     if not _bar_point_is_plausibly_held(
                         visual_anchor_point,
                         record.pose,
-                        (input_metadata.height, input_metadata.width, 3),
+                        (output_geometry.metadata.height, output_geometry.metadata.width, 3),
+                        record.view_mode,
                     ):
                         # Keep a false rack/background detection out of the output as
                         # well as out of the metrics. A confident-looking box is still
@@ -1861,7 +1991,8 @@ def main() -> None:
                     and _bar_point_is_plausibly_held(
                         reconstructed_sample.point,
                         record.pose,
-                        (input_metadata.height, input_metadata.width, 3),
+                        (output_geometry.metadata.height, output_geometry.metadata.width, 3),
+                        record.view_mode,
                     )
                 )
                 if held_by_lifter and record is not None and reconstructed_sample is not None:
