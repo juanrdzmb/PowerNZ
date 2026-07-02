@@ -209,6 +209,22 @@ def test_overlay_draws_clean_plate_corner_box_by_default_without_fake_hub() -> N
     assert output[120, 160].sum() == 0
 
 
+def test_overlay_label_pills_avoid_reserved_hud_area() -> None:
+    renderer = OverlayRenderer(OverlayConfig(background_dim_alpha=0.0, glow_strength=0.0))
+    frame = np.zeros((400, 400, 3), dtype=np.uint8)
+    reserved = (20, 20, 380, 130)
+
+    rect = renderer._label_pill(
+        frame,
+        "Bar",
+        (180, 120),
+        (220, 220, 220),
+        avoid_rects=[reserved],
+    )
+
+    assert not renderer._rects_intersect(rect, reserved)
+
+
 def test_overlay_velocity_chart_defaults_to_bar_only() -> None:
     renderer = OverlayRenderer()
     history = {

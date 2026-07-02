@@ -67,6 +67,41 @@ def test_rep_table_never_overlaps_telemetry():
             assert y1 >= 0 and y2 <= height
 
 
+def test_all_main_panels_are_centered_and_have_safe_vertical_gaps():
+    renderer = OverlayRenderer()
+    reps = [_rep(i) for i in range(1, 5)]
+    for height, width in FRAME_SIZES:
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        telemetry = renderer._telemetry_rect(frame)
+        chart = renderer._velocity_chart_rect(frame)
+        assert abs((telemetry[0] + telemetry[2]) - width) <= 1
+        assert abs((chart[0] + chart[2]) - width) <= 1
+        assert not _intersects(telemetry, chart)
+
+        geometry = renderer._rep_table_geometry(frame, reps, chart[1], telemetry)
+        if geometry is None:
+            continue
+        table = geometry[:4]
+        assert abs((table[0] + table[2]) - width) <= 1
+        assert not _intersects(table, telemetry)
+        assert not _intersects(table, chart)
+        assert table[1] - telemetry[3] >= 10
+        assert chart[1] - table[3] >= 10
+
+
+def test_rep_table_uses_readable_responsive_columns():
+    renderer = OverlayRenderer()
+    compact = np.zeros((720, 310, 3), dtype=np.uint8)
+    regular = np.zeros((1280, 720, 3), dtype=np.uint8)
+
+    compact_columns = renderer._rep_table_columns(compact, 10, 300, 10)
+    regular_columns = renderer._rep_table_columns(regular, 20, 700, 14)
+
+    assert [key for _, key, _ in compact_columns] == ["rep", "vel", "peak", "loss"]
+    assert [key for _, key, _ in regular_columns] == ["rep", "con", "vel", "peak", "ecc", "loss"]
+    assert all(a[2] < b[2] for a, b in zip(compact_columns, compact_columns[1:]))
+
+
 def test_rep_table_shows_on_tall_frame():
     renderer = OverlayRenderer()
     reps = [_rep(i) for i in range(1, 5)]

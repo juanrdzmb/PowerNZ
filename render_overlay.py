@@ -72,8 +72,15 @@ BIOMECHANICAL_KEYPOINTS = {
 UI_FONT = cv2.FONT_HERSHEY_DUPLEX
 UI_FONT_PLAIN = cv2.FONT_HERSHEY_DUPLEX
 TTF_FONT_CANDIDATES = (
+    Path("C:/Windows/Fonts/SegUIVar.ttf"),
+    Path("C:/Windows/Fonts/segoeui-variable.ttf"),
     Path("C:/Windows/Fonts/segoeui.ttf"),
     Path("C:/Windows/Fonts/arial.ttf"),
+)
+TTF_FONT_EMPHASIS_CANDIDATES = (
+    Path("C:/Windows/Fonts/seguisb.ttf"),
+    Path("C:/Windows/Fonts/segoeuib.ttf"),
+    *TTF_FONT_CANDIDATES,
 )
 
 
@@ -110,11 +117,12 @@ def _ascii(text: str) -> str:
     return text.translate(_ASCII_MAP)
 
 
-@lru_cache(maxsize=32)
-def _load_ttf_font(pixel_size: int):
+@lru_cache(maxsize=64)
+def _load_ttf_font(pixel_size: int, emphasis: bool = False):
     if ImageFont is None:
         return None
-    for font_path in TTF_FONT_CANDIDATES:
+    candidates = TTF_FONT_EMPHASIS_CANDIDATES if emphasis else TTF_FONT_CANDIDATES
+    for font_path in candidates:
         if not font_path.exists():
             continue
         try:
@@ -132,12 +140,13 @@ def _draw_ttf_text(
     color: tuple[int, int, int],
     thickness: int,
     shadow: bool,
+    emphasis: bool = False,
 ) -> bool:
     if Image is None or ImageDraw is None:
         return False
 
     font_size = max(10, int(round(scale * 34)))
-    font = _load_ttf_font(font_size)
+    font = _load_ttf_font(font_size, emphasis)
     if font is None:
         return False
 
@@ -183,6 +192,24 @@ def _draw_ttf_text(
     blended = roi * (1.0 - alpha) + rgb * alpha
     frame[crop_y1:crop_y2, crop_x1:crop_x2] = blended.clip(0, 255).astype(np.uint8)
     return True
+
+
+def _measure_text(
+    text: str,
+    scale: float,
+    thickness: int = 1,
+    emphasis: bool = False,
+) -> tuple[int, int]:
+    """Measure with the same font used for drawing, preventing layout drift."""
+    text = _ascii(text)
+    font_size = max(10, int(round(scale * 34)))
+    font = _load_ttf_font(font_size, emphasis)
+    if font is not None and Image is not None and ImageDraw is not None:
+        scratch = Image.new("L", (1, 1), 0)
+        bbox = ImageDraw.Draw(scratch).textbbox((0, 0), text, font=font)
+        return max(1, bbox[2] - bbox[0]), max(1, bbox[3] - bbox[1])
+    size, _ = cv2.getTextSize(text, UI_FONT, scale, thickness)
+    return size
 
 
 # Velocity chart series for the comparative overlay. Ordered so the bar
@@ -258,7 +285,18 @@ class OverlayRenderer:
 
     @staticmethod
     def _is_compact(frame: Frame) -> bool:
-        return frame.shape[1] < 520
+        return frame.shape[1] < 520 or frame.shape[0] < 600
+
+    def _velocity_chart_rect(self, frame: Frame) -> tuple[int, int, int, int]:
+        scale = self._ui_scale(frame)
+        compact = self._is_compact(frame)
+        margin = max(10, int(20 * scale))
+        chart_height = max(66, int((104 if compact else 178) * scale))
+        x1 = margin
+        x2 = frame.shape[1] - margin
+        y2 = frame.shape[0] - margin
+        y1 = y2 - chart_height
+        return x1, y1, x2, y2
 
     @staticmethod
     def _rects_overlap_x(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
@@ -273,10 +311,12 @@ class OverlayRenderer:
         panels can avoid overlapping it (important on 9:16 / short frames)."""
         scale = self._ui_scale(frame)
         compact = self._is_compact(frame)
-        margin = max(8, int(24 * scale))
-        panel_width = frame.shape[1] - margin * 2 if compact else min(560, frame.shape[1] - margin * 2)
+        margin = max(10, int(20 * scale))
+        available_width = frame.shape[1] - margin * 2
+        panel_width = available_width if compact else min(680, available_width)
         panel_height = max(96, int((136 if compact else 246) * scale))
-        return margin, margin, margin + panel_width, margin + panel_height
+        x1 = max(margin, (frame.shape[1] - panel_width) // 2)
+        return x1, margin, x1 + panel_width, margin + panel_height
 
     @staticmethod
     def _telemetry_stats(
@@ -343,9 +383,10 @@ class OverlayRenderer:
         color: tuple[int, int, int] = TEXT,
         thickness: int = 1,
         shadow: bool = True,
+        emphasis: bool = False,
     ) -> None:
         text = _ascii(text)
-        if _draw_ttf_text(frame, text, origin, scale, color, thickness, shadow):
+        if _draw_ttf_text(frame, text, origin, scale, color, thickness, shadow, emphasis):
             return
         if shadow:
             cv2.putText(frame, text, (origin[0] + 1, origin[1] + 1), UI_FONT,
@@ -359,31 +400,45 @@ class OverlayRenderer:
         anchor: tuple[int, int],
         color: tuple[int, int, int],
         prefer_above: bool = True,
-    ) -> None:
+        avoid_rects: list[tuple[int, int, int, int]] | None = None,
+    ) -> tuple[int, int, int, int]:
         scale = self._ui_scale(frame)
         font_scale = max(0.34, 0.48 * scale)
         thickness = max(1, int(2 * scale))
         pad_x = max(5, int(7 * scale))
         pad_y = max(3, int(5 * scale))
-        text_size, _ = cv2.getTextSize(text, UI_FONT, font_scale, thickness)
-        x1 = anchor[0]
-        y2 = anchor[1] - max(4, int(5 * scale)) if prefer_above else anchor[1] + text_size[1] + pad_y * 2
-        y1 = y2 - text_size[1] - pad_y * 2
-        x2 = x1 + text_size[0] + pad_x * 2
+        text_size = _measure_text(text, font_scale, thickness)
+        width = text_size[0] + pad_x * 2
+        height = text_size[1] + pad_y * 2
+        gap = max(4, int(6 * scale))
+        max_x = max(2, frame.shape[1] - width - 2)
+        x_candidates = [
+            max(2, min(anchor[0], max_x)),
+            max(2, min(anchor[0] - width, max_x)),
+        ]
+        above_y = anchor[1] - gap - height
+        below_y = anchor[1] + gap
+        avoid_rects = avoid_rects or []
+        y_candidates = [above_y, below_y] if prefer_above else [below_y, above_y]
+        for avoid in avoid_rects:
+            y_candidates.extend((avoid[3] + gap, avoid[1] - gap - height))
+        candidates: list[tuple[int, int, int, int]] = []
+        for top in y_candidates:
+            top = max(2, min(top, frame.shape[0] - height - 2))
+            for left in x_candidates:
+                rect = (left, top, left + width, top + height)
+                if rect not in candidates:
+                    candidates.append(rect)
 
-        if y1 < 2:
-            y1 = anchor[1] + max(4, int(5 * scale))
-            y2 = y1 + text_size[1] + pad_y * 2
-        if x2 > frame.shape[1] - 2:
-            shift = x2 - (frame.shape[1] - 2)
-            x1 -= shift
-            x2 -= shift
-        x1 = max(2, x1)
-        x2 = min(frame.shape[1] - 2, x2)
-        if y2 > frame.shape[0] - 2:
-            shift = y2 - (frame.shape[0] - 2)
-            y1 -= shift
-            y2 -= shift
+        selected = next(
+            (
+                rect
+                for rect in candidates
+                if not any(self._rects_intersect(rect, avoid) for avoid in avoid_rects)
+            ),
+            candidates[0],
+        )
+        x1, y1, x2, y2 = selected
 
         self._rounded_panel(
             frame,
@@ -396,6 +451,7 @@ class OverlayRenderer:
             border=color,
         )
         self._text(frame, text, (x1 + pad_x, y2 - pad_y - 1), font_scale, color, thickness)
+        return selected
 
     def render(
         self,
@@ -433,12 +489,24 @@ class OverlayRenderer:
         compact = self._is_compact(output)
         telemetry_rect = self._telemetry_rect(output)
         self._draw_subject_glow(output, pose, detections)
-        self._draw_torso_guide(output, pose, technique, view_mode)
+        self._draw_torso_guide(
+            output,
+            pose,
+            technique,
+            view_mode,
+            avoid_rects=[telemetry_rect],
+        )
         self._draw_pose(output, pose)
         if debug_anchor:
             self._draw_detections(output, detections)
         if bar_anchor is not None:
-            self._draw_bar_anchor(output, bar_anchor, detections, debug_anchor)
+            self._draw_bar_anchor(
+                output,
+                bar_anchor,
+                detections,
+                debug_anchor,
+                avoid_rects=[telemetry_rect],
+            )
         body_proxy_active = sample is not None and sample.tracking_source == "body_proxy"
         self._draw_body_proxy(output, body_proxy_point if body_proxy_active else None)
         self._draw_bar_path(output, bar_path or [], proxy_mode=body_proxy_active)
@@ -531,6 +599,7 @@ class OverlayRenderer:
         pose: PoseResult,
         technique: TechniqueAssessment | None,
         view_mode: str,
+        avoid_rects: list[tuple[int, int, int, int]] | None = None,
     ) -> None:
         """Draw a clean shoulder-to-hip axis for lateral technique review."""
         if view_mode != "lateral" or not pose.detected:
@@ -557,7 +626,13 @@ class OverlayRenderer:
             cv2.circle(frame, point, max(2, int(3 * scale)), TEXT, -1, cv2.LINE_AA)
         if technique is not None and technique.torso_angle_degrees is not None:
             label = f"TORSO {technique.torso_angle_degrees:.0f}°"
-            self._label_pill(frame, label, (shoulder[0] + int(8 * scale), shoulder[1]), ACCENT)
+            self._label_pill(
+                frame,
+                label,
+                (shoulder[0] + int(8 * scale), shoulder[1]),
+                ACCENT,
+                avoid_rects=avoid_rects,
+            )
 
     def _smooth_pose(self, pose: PoseResult, frame: Frame) -> PoseResult:
         if not pose.detected:
@@ -715,6 +790,7 @@ class OverlayRenderer:
         anchor: BarAnchorState | None,
         detections: list[Detection] | None,
         debug_anchor: bool,
+        avoid_rects: list[tuple[int, int, int, int]] | None = None,
     ) -> None:
         if anchor is None or anchor.point is None or anchor.rect is None:
             return
@@ -760,7 +836,15 @@ class OverlayRenderer:
             self._draw_corner_box(frame, x1, y1, x2, y2, plate_color, scale)
         else:
             cv2.rectangle(frame, (x1, y1), (x2, y2), plate_color, max(1, int(2.4 * scale)), cv2.LINE_AA)
-        self._label_pill(frame, "Plate", (x1, y1), plate_color)
+        occupied = list(avoid_rects or [])
+        plate_label_rect = self._label_pill(
+            frame,
+            "Plate",
+            (x1, y1),
+            plate_color,
+            avoid_rects=occupied,
+        )
+        occupied.append(plate_label_rect)
 
         if debug_anchor:
             cv2.line(frame, (int(point.x), 0), (int(point.x), frame.shape[0] - 1), ACCENT_SOFT, 1, cv2.LINE_AA)
@@ -777,7 +861,14 @@ class OverlayRenderer:
         hub_y2 = min(frame.shape[0] - 1, int(hub_rect.y2))
         cv2.rectangle(frame, (hub_x1, hub_y1), (hub_x2, hub_y2), hub_color, max(1, int(2 * scale)), cv2.LINE_AA)
         # Label the hub to the right of its box so it never sits on top of the "Plate" pill.
-        self._label_pill(frame, "Bar", (hub_x2 + max(4, int(6 * scale)), hub_y1), hub_color, prefer_above=False)
+        self._label_pill(
+            frame,
+            "Bar",
+            (hub_x2 + max(4, int(6 * scale)), hub_y1),
+            hub_color,
+            prefer_above=False,
+            avoid_rects=occupied,
+        )
         cv2.circle(frame, (int(point.x), int(point.y)), max(3, int(4 * scale)), (245, 245, 245), -1, cv2.LINE_AA)
         cv2.circle(frame, (int(point.x), int(point.y)), max(6, int(9 * scale)), hub_color, max(1, int(2 * scale)), cv2.LINE_AA)
 
@@ -1026,7 +1117,7 @@ class OverlayRenderer:
         font_scale = max(0.46, 0.98 * scale)
         thickness = max(2, int(3 * scale))
         pad = max(5, int(10 * scale))
-        text_size, _ = cv2.getTextSize(text, UI_FONT, font_scale, thickness)
+        text_size = _measure_text(text, font_scale, thickness)
         origin_x = int(center_x + 18 * scale)
         origin_y = int(center_y - 8 * scale)
         x1 = origin_x - pad
@@ -1095,7 +1186,7 @@ class OverlayRenderer:
             cv2.circle(frame, (cx, cy), max(4, int(6 * scale)), (245, 245, 240), 1, cv2.LINE_AA)
 
             text = f"{anchor.velocity_mps:+.2f}"
-            (text_w, text_h), _ = cv2.getTextSize(text, UI_FONT, font_scale, thickness)
+            text_w, text_h = _measure_text(text, font_scale, thickness)
             ox = cx + int(12 * scale)
             oy = cy - int(6 * scale)
             if ox + text_w + 6 > frame.shape[1]:
@@ -1143,13 +1234,7 @@ class OverlayRenderer:
 
         scale = self._ui_scale(frame)
         compact = self._is_compact(frame)
-        margin = max(8, int(24 * scale))
-        chart_width = frame.shape[1] - margin * 2
-        chart_height = max(66, int((104 if compact else 178) * scale))
-        x1 = margin
-        y2 = frame.shape[0] - margin
-        y1 = y2 - chart_height
-        x2 = x1 + chart_width
+        x1, y1, x2, y2 = self._velocity_chart_rect(frame)
         plot_x1 = x1 + max(12, int(36 * scale))
         plot_x2 = x2 - max(10, int(14 * scale))
         plot_y1 = y1 + max(34, int((42 if compact else 48) * scale))
@@ -1260,7 +1345,7 @@ class OverlayRenderer:
             big_text = f"{current_bar:+.2f}"
             big_scale = max(0.48, 0.98 * scale)
             big_thickness = max(1, int(3 * scale))
-            big_size, _ = cv2.getTextSize(big_text, UI_FONT, big_scale, big_thickness)
+            big_size = _measure_text(big_text, big_scale, big_thickness, emphasis=True)
             unit_w = 0 if compact else int(42 * scale)
             self._text(
                 frame,
@@ -1269,6 +1354,7 @@ class OverlayRenderer:
                 big_scale,
                 color_for_velocity(current_bar),
                 big_thickness,
+                emphasis=True,
             )
             if not compact:
                 self._text(frame, "m/s", (x2 - unit_w - 4, y1 + int(27 * scale)), 0.54, TEXT_DIM, 2)
@@ -1328,10 +1414,8 @@ class OverlayRenderer:
         x2: int,
         metric_source: str = "bar_hub",
     ) -> None:
-        # With one hands-derived estimate, the headline and the live value already
-        # say everything useful.  A second "Bar" legend would be both redundant and
-        # inaccurate.
-        if metric_source == "body_proxy" and len(series) == 1 and series[0][0] == "bar":
+        # A one-series legend repeats the chart title and steals horizontal space.
+        if len(series) == 1 and series[0][0] == "bar":
             return
         scale = self._ui_scale(frame)
         font_scale = max(0.34, 0.48 * scale)
@@ -1344,7 +1428,7 @@ class OverlayRenderer:
             last_value = next((v for v in reversed(values) if np.isfinite(v)), None)
             value_str = f"{last_value:+.2f}" if last_value is not None else "  -- "
             legend_text = f"{label} {value_str}"
-            text_size, _ = cv2.getTextSize(legend_text, UI_FONT, font_scale, thickness)
+            text_size = _measure_text(legend_text, font_scale, thickness)
             item_w = text_size[0] + max(18, int(26 * scale))
             if x + item_w > x2 - max(60, int(90 * scale)):
                 break
@@ -1394,13 +1478,14 @@ class OverlayRenderer:
         if not rep_reports:
             return None
         scale = self._ui_scale(frame)
-        table_width = min(int(640 * scale) + 70, frame.shape[1] - max(24, int(40 * scale)))
+        margin = max(10, int(20 * scale))
+        table_width = min(680, frame.shape[1] - margin * 2)
         row_height = max(26, int(32 * scale))
         header_h = max(54, int(66 * scale))
         tail = max(8, int(12 * scale))
-        x2 = frame.shape[1] - max(12, int(20 * scale))
-        x1 = x2 - table_width
-        gap = max(8, int(12 * scale))
+        x1 = max(margin, (frame.shape[1] - table_width) // 2)
+        x2 = x1 + table_width
+        gap = max(10, int(14 * scale))
         bottom = (bottom_limit - gap) if bottom_limit is not None else (frame.shape[0] - max(12, int(20 * scale)))
 
         # Reserve a safe top so the table never grows into the telemetry panel.
@@ -1429,24 +1514,24 @@ class OverlayRenderer:
         x1, y1, x2, y2, rows = geometry
         scale = self._ui_scale(frame)
         fastest = max(rep_reports, key=lambda rep: rep.mean_concentric_velocity_mps)
-        table_width = x2 - x1
         row_height = max(26, int(32 * scale))
 
         self._rounded_panel(frame, x1, y1, x2, y2, alpha=0.7, radius=max(6, int(12 * scale)), accent=ACCENT)
 
         pad = max(10, int(14 * scale))
-        self._text(frame, f"FASTEST  R{fastest.rep_index}", (x1 + pad, y1 + int(24 * scale)), max(0.46, 0.68 * scale), ACCENT, max(1, int(2 * scale)))
+        self._text(
+            frame,
+            f"FASTEST  R{fastest.rep_index}",
+            (x1 + pad, y1 + int(24 * scale)),
+            max(0.46, 0.68 * scale),
+            ACCENT,
+            max(1, int(2 * scale)),
+            emphasis=True,
+        )
 
-        columns = [
-            ("Rep", x1 + pad),
-            ("Con(s)", x1 + pad + int(table_width * 0.17)),
-            ("Vel(m/s)", x1 + pad + int(table_width * 0.33)),
-            ("Peak(m/s)", x1 + pad + int(table_width * 0.52)),
-            ("Ecc(s)", x1 + pad + int(table_width * 0.72)),
-            ("Loss", x1 + pad + int(table_width * 0.88)),
-        ]
+        columns = self._rep_table_columns(frame, x1, x2, pad)
         header_y = y1 + int(50 * scale)
-        for label, column_x in columns:
+        for label, _, column_x in columns:
             self._text(frame, label, (column_x, header_y), max(0.34, 0.46 * scale), TEXT_DIM, 1, shadow=False)
         cv2.line(frame, (x1 + pad, header_y + int(8 * scale)), (x2 - pad, header_y + int(8 * scale)), PANEL_BORDER, 1, cv2.LINE_AA)
 
@@ -1455,20 +1540,51 @@ class OverlayRenderer:
             is_best = rep.rep_index == fastest.rep_index
             color = POS_COLOR if is_best else TEXT
             thickness = max(1, int(2 * scale)) if is_best else 1
-            cells = [
-                f"R{rep.rep_index}",
-                f"{rep.concentric_seconds:.2f}",
-                f"{rep.mean_concentric_velocity_mps:.2f}",
-                f"{rep.peak_velocity_mps:.2f}",
-                f"{rep.eccentric_seconds:.2f}",
-                f"{rep.velocity_loss_from_best_percent:.0f}%",
-            ]
-            for (_, column_x), value in zip(columns, cells):
+            cells = {
+                "rep": f"R{rep.rep_index}",
+                "con": f"{rep.concentric_seconds:.2f}",
+                "vel": f"{rep.mean_concentric_velocity_mps:.2f}",
+                "peak": f"{rep.peak_velocity_mps:.2f}",
+                "ecc": f"{rep.eccentric_seconds:.2f}",
+                "loss": f"{rep.velocity_loss_from_best_percent:.0f}%",
+            }
+            for _, key, column_x in columns:
+                value = cells[key]
                 cell_color = NEG_COLOR if value.endswith("%") and rep.velocity_loss_warning else color
                 self._text(frame, value, (column_x, y), max(0.34, 0.50 * scale), cell_color, thickness)
             if is_best:
                 cv2.circle(frame, (x1 + int(pad * 0.55), y - int(5 * scale)), max(2, int(3 * scale)), ACCENT, -1, cv2.LINE_AA)
             y += row_height
+
+    def _rep_table_columns(
+        self,
+        frame: Frame,
+        x1: int,
+        x2: int,
+        pad: int,
+    ) -> list[tuple[str, str, int]]:
+        """Responsive columns: narrow exports keep only metrics that remain legible."""
+        if self._is_compact(frame):
+            specs = [
+                ("Rep", "rep", 0.00),
+                ("Vel", "vel", 0.25),
+                ("Peak", "peak", 0.52),
+                ("Loss", "loss", 0.82),
+            ]
+        else:
+            specs = [
+                ("Rep", "rep", 0.00),
+                ("Con(s)", "con", 0.17),
+                ("Vel(m/s)", "vel", 0.33),
+                ("Peak(m/s)", "peak", 0.52),
+                ("Ecc(s)", "ecc", 0.72),
+                ("Loss", "loss", 0.88),
+            ]
+        usable = max(1, x2 - x1 - pad * 2)
+        return [
+            (label, key, x1 + pad + int(usable * fraction))
+            for label, key, fraction in specs
+        ]
 
     def _draw_telemetry_panel(
         self,
@@ -1504,7 +1620,7 @@ class OverlayRenderer:
         title_scale = max(0.5, 0.84 * scale)
         title_th = max(1, int(2 * scale))
         title_y = y1 + max(22, int(31 * scale))
-        self._text(frame, "PowerNZ", (text_x, title_y), title_scale, ACCENT, title_th)
+        self._text(frame, "PowerNZ", (text_x, title_y), title_scale, ACCENT, title_th, emphasis=True)
         if sample is not None:
             self._draw_state_pill(frame, sample.state, self._state_color(sample.state), x2 - pad, title_y, scale)
         div_y = title_y + max(8, int(13 * scale))
@@ -1551,8 +1667,8 @@ class OverlayRenderer:
         hero_scale = max(0.8, 1.5 * scale)
         hero_th = max(2, int(3 * scale))
         hero_y = cap_y + max(28, int(42 * scale))
-        self._text(frame, hero, (text_x, hero_y), hero_scale, vel_color, hero_th)
-        hsize, _ = cv2.getTextSize(_ascii(hero), UI_FONT, hero_scale, hero_th)
+        self._text(frame, hero, (text_x, hero_y), hero_scale, vel_color, hero_th, emphasis=True)
+        hsize = _measure_text(hero, hero_scale, hero_th, emphasis=True)
         self._text(frame, "m/s", (text_x + hsize[0] + int(10 * scale), hero_y),
                    max(0.4, 0.56 * scale), TEXT_DIM, max(1, int(2 * scale)))
 
@@ -1566,15 +1682,30 @@ class OverlayRenderer:
         # --- Quality + view line ---
         q_y = stat_y + max(36, int(50 * scale))
         self._text(frame, "CALIDAD", (text_x, q_y), max(0.34, 0.42 * scale), TEXT_DIM, 1, shadow=False)
-        self._text(frame, self._quality_text(technique), (text_x + int(98 * scale), q_y),
-                   max(0.4, 0.54 * scale), self._quality_color(technique), max(1, int(2 * scale)))
+        quality = self._quality_text(technique)
+        quality_x = text_x + int(98 * scale)
+        quality_scale = max(0.4, 0.54 * scale)
+        self._text(
+            frame,
+            quality,
+            (quality_x, q_y),
+            quality_scale,
+            self._quality_color(technique),
+            max(1, int(2 * scale)),
+        )
         signal = self._signal_label(sample, technique)
         signal_scale = max(0.30, 0.40 * scale)
-        vsize, _ = cv2.getTextSize(_ascii(signal), UI_FONT, signal_scale, 1)
+        vsize = _measure_text(signal, signal_scale, 1)
+        quality_size = _measure_text(quality, quality_scale, max(1, int(2 * scale)))
+        right_edge = x2 - pad
+        minimum_signal_x = quality_x + quality_size[0] + max(10, int(14 * scale))
+        if right_edge - vsize[0] < minimum_signal_x:
+            signal = self._compact_signal_label(sample)
+            vsize = _measure_text(signal, signal_scale, 1)
         self._text(
             frame,
             signal,
-            (x2 - pad - vsize[0], q_y),
+            (max(minimum_signal_x, right_edge - vsize[0]), q_y),
             signal_scale,
             self._signal_color(sample),
             1,
@@ -1609,6 +1740,15 @@ class OverlayRenderer:
             return ACCENT
         return NEG_COLOR
 
+    @staticmethod
+    def _compact_signal_label(sample: KinematicSample) -> str:
+        if sample.tracking_source == "body_proxy":
+            return "MUÑECAS*"
+        if sample.tracking_source == "plate_center":
+            return f"DISCO {sample.plate_confidence * 100:.0f}%"
+        confidence = max(sample.hub_confidence, sample.plate_confidence)
+        return f"HUB {confidence * 100:.0f}%"
+
     def _draw_state_pill(
         self,
         frame: Frame,
@@ -1621,7 +1761,7 @@ class OverlayRenderer:
         text = _ascii(state).upper()
         font_scale = max(0.32, 0.42 * scale)
         thickness = max(1, int(1 * scale))
-        tsize, _ = cv2.getTextSize(text, UI_FONT, font_scale, thickness)
+        tsize = _measure_text(text, font_scale, thickness, emphasis=True)
         dot_r = max(2, int(3 * scale))
         pad_x = max(6, int(9 * scale))
         pad_y = max(3, int(5 * scale))
@@ -1635,7 +1775,16 @@ class OverlayRenderer:
         dot_x = cx1 + pad_x + dot_r
         dot_cy = (cy1 + cy2) // 2
         cv2.circle(frame, (dot_x, dot_cy), dot_r, color, -1, cv2.LINE_AA)
-        self._text(frame, text, (dot_x + dot_r + int(5 * scale), cy2 - pad_y - 1), font_scale, color, thickness, shadow=False)
+        self._text(
+            frame,
+            text,
+            (dot_x + dot_r + int(5 * scale), cy2 - pad_y - 1),
+            font_scale,
+            color,
+            thickness,
+            shadow=False,
+            emphasis=True,
+        )
 
     def _draw_stat(
         self,
@@ -1648,8 +1797,15 @@ class OverlayRenderer:
         value_color: tuple[int, int, int] = TEXT,
     ) -> None:
         self._text(frame, caption, (x, y), max(0.32, 0.40 * scale), TEXT_DIM, 1, shadow=False)
-        self._text(frame, value, (x, y + max(20, int(26 * scale))), max(0.44, 0.62 * scale),
-                   value_color, max(1, int(2 * scale)))
+        self._text(
+            frame,
+            value,
+            (x, y + max(20, int(26 * scale))),
+            max(0.44, 0.62 * scale),
+            value_color,
+            max(1, int(2 * scale)),
+            emphasis=True,
+        )
 
     @staticmethod
     def _quality_color(technique: TechniqueAssessment | None) -> tuple[int, int, int]:
